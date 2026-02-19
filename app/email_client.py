@@ -298,6 +298,8 @@ class GmailProvider(EmailProvider):
                 if date_str:
                     try:
                         dt_object = parsedate_to_datetime(date_str)
+                        if dt_object.tzinfo is None:
+                            dt_object = dt_object.replace(tzinfo=datetime.timezone.utc)
                         email_date = dt_object.isoformat()
                         email_dates.append(dt_object)
                     except Exception:

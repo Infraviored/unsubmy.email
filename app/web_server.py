@@ -58,7 +58,7 @@ def login():
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
     if request.method == 'POST':
-        email = request.form.get('email')
+        email = request.form.get('email').lower()
         password = request.form.get('password')
         user = User.query.filter_by(email=email).first() # type: ignore
         if user is None or not user.check_password(password):
@@ -72,7 +72,7 @@ def login():
 def register():
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
-    email = request.form.get('email')
+    email = request.form.get('email').lower()
     password = request.form.get('password')
     
     if User.query.filter_by(email=email).first():
@@ -146,15 +146,22 @@ def dashboard():
 @app.route('/login/google')
 @login_required
 def google_login():
-    # No longer needed with ProxyFix and production HTTPS
-    # os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1" 
+    # Relax strict HTTPS check for oauthlib running inside container (SSL terminated at Nginx)
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1" 
+    app.config['SESSION_COOKIE_SECURE'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    
+    redirect_uri = url_for('oauth2callback', _external=True, _scheme='https')
+    logging.info(f"Using OAuth Redirect URI: {redirect_uri}")
+
     flow = Flow.from_client_secrets_file(
         'client_secret.json',
         scopes=['https://www.googleapis.com/auth/gmail.readonly'],
-        redirect_uri=url_for('oauth2callback', _external=True))
+        redirect_uri=redirect_uri)
     authorization_url, state = flow.authorization_url(
         access_type='offline',
-        prompt='consent'
+        prompt='consent',
+        include_granted_scopes='true'
     )
     session['state'] = state
     return redirect(authorization_url)
@@ -163,13 +170,20 @@ def google_login():
 @login_required
 def oauth2callback():
     state = session['state']
+    redirect_uri = url_for('oauth2callback', _external=True, _scheme='https')
+    
     flow = Flow.from_client_secrets_file(
         'client_secret.json', scopes=['https://www.googleapis.com/auth/gmail.readonly'],
-        state=state, redirect_uri=url_for('oauth2callback', _external=True))
+        state=state, redirect_uri=redirect_uri)
 
-    logging.warning(f"Request URL from Google: {request.url}")
+    # Force HTTPS for the authorization response URL if it comes in as HTTP
+    auth_response_url = request.url
+    if auth_response_url.startswith('http:'):
+        auth_response_url = auth_response_url.replace('http:', 'https:', 1)
+
+    logging.warning(f"Request URL from Google (forced HTTPS): {auth_response_url}")
     
-    flow.fetch_token(authorization_response=request.url)
+    flow.fetch_token(authorization_response=auth_response_url)
     credentials = flow.credentials
 
     logging.warning("--- Google OAuth Callback Data ---")
@@ -182,7 +196,7 @@ def oauth2callback():
 
     service = build('gmail', 'v1', credentials=credentials)
     profile = service.users().getProfile(userId='me').execute()
-    email_address = profile['emailAddress']
+    email_address = profile['emailAddress'].lower()
 
     # Check if this email is already linked
     existing_account = LinkedAccount.query.filter_by(email_address=email_address, user_id=current_user.id).first() # type: ignore
@@ -221,7 +235,7 @@ def get_accounts():
 @login_required
 def add_account():
     data = request.get_json() or {}
-    email = data.get('email_address')
+    email = data.get('email_address').lower()
     if not email:
         return jsonify({"status": "ERROR", "message": "Email address is required."}), 400
     
@@ -240,7 +254,7 @@ def add_account():
 @login_required
 def update_account():
     data = request.get_json() or {}
-    email = data.get('email_address')
+    email = data.get('email_address').lower()
     account = LinkedAccount.query.filter_by(email_address=email, user_id=current_user.id).first_or_404() # type: ignore
     
     # Update password if provided
@@ -260,7 +274,7 @@ def update_account():
 @login_required
 def delete_linked_account():
     data = request.get_json() or {}
-    email = data.get('email_address')
+    email = data.get('email_address').lower()
     account = LinkedAccount.query.filter_by(email_address=email, user_id=current_user.id).first_or_404() # type: ignore
     db.session.delete(account)
     db.session.commit()
@@ -272,7 +286,7 @@ def test_connection():
     data = request.get_json() or {}
     try:
         client = get_email_client(
-            data['provider'], data['email_address'], data.get('password'), data.get('imap_server')
+            data['provider'], data['email_address'].lower(), data.get('password'), data.get('imap_server')
         )
         client.connect()
         client.logout()
@@ -284,7 +298,7 @@ def test_connection():
 @app.route('/api/unsubscribe_links', methods=['GET'])
 @login_required
 def get_unsubscribe_links():
-    links = db.session.query(UnsubscribeLink, LinkedAccount.email_address).join(LinkedAccount, UnsubscribeLink.linked_account_id == LinkedAccount.id).filter(UnsubscribeLink.user_id == current_user.id).order_by(UnsubscribeLink.added_at.desc()).all()
+    links = db.session.query(UnsubscribeLink, LinkedAccount.email_address).join(LinkedAccount, UnsubscribeLink.linked_account_id == LinkedAccount.id).filter(UnsubscribeLink.user_id == current_user.id).order_by(UnsubscribeLink.unsubscribed.asc(), UnsubscribeLink.added_at.desc()).all()
     
     links_data = []
     for link, email_address in links:
@@ -323,7 +337,7 @@ def log_unsubscribe():
 @app.route('/scan')
 @login_required
 def scan():
-    email_address = request.args.get('email_address')
+    email_address = request.args.get('email_address').lower()
     num_emails_str = request.args.get('num_emails')
     since_date_str = request.args.get('since_date')
     user_id = current_user.id # Get user_id while request context is active
@@ -346,7 +360,13 @@ def scan():
                     password_or_creds, 
                     account.imap_server
                 )
-                client.connect()
+                status, msg = client.connect()
+                if status == "ERROR":
+                    logging.error(f"Scan connection failed for {account.email_address}: {msg}")
+                    yield f'data: {json.dumps({"error": f"Connection failed: {msg}"})}\n\n'
+                    return
+                else:
+                    logging.info(f"Scan connection successful for {account.email_address}")
 
                 scan_params = {}
                 if num_emails_str:
@@ -386,7 +406,7 @@ def scan():
                         if new_links_found > 0:
                             db.session.commit()
                         
-                        all_user_links = db.session.query(UnsubscribeLink, LinkedAccount.email_address).join(LinkedAccount, UnsubscribeLink.linked_account_id == LinkedAccount.id).filter(UnsubscribeLink.user_id == scan_user_id).order_by(UnsubscribeLink.added_at.desc()).all()
+                        all_user_links = db.session.query(UnsubscribeLink, LinkedAccount.email_address).join(LinkedAccount, UnsubscribeLink.linked_account_id == LinkedAccount.id).filter(UnsubscribeLink.user_id == scan_user_id).order_by(UnsubscribeLink.unsubscribed.asc(), UnsubscribeLink.added_at.desc()).all()
                         
                         final_data = {
                             "status": "completed",

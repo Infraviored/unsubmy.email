@@ -6,6 +6,9 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: unsubmy-email-backend
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     restart: always
     ports:
       - "127.0.0.1:8000:8000"

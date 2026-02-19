@@ -430,7 +430,39 @@
             </div>
         `;
 
-        const domains = Object.keys(linksByDomain).sort();
+        // Helper to get sort data for a domain
+        const getDomainSortData = (domain) => {
+            const links = linksByDomain[domain];
+            let latestUnsub = null;
+            let maxReceived = 0; // timestamp
+
+            links.forEach(l => {
+                const receivedTime = new Date(l.added_at).getTime();
+                if (receivedTime > maxReceived) maxReceived = receivedTime;
+                
+                if (l.unsubscribed_at) {
+                    const unsubTime = new Date(l.unsubscribed_at).getTime();
+                    if (!latestUnsub || unsubTime > latestUnsub) latestUnsub = unsubTime;
+                }
+            });
+
+            // Active if never unsubscribed OR received mail after last unsubscribe
+            const isActive = !latestUnsub || (maxReceived > latestUnsub);
+            
+            return { isActive, maxReceived };
+        };
+
+        const domains = Object.keys(linksByDomain).sort((a, b) => {
+            const dataA = getDomainSortData(a);
+            const dataB = getDomainSortData(b);
+
+            // 1. Sort by Active status (Active first)
+            if (dataA.isActive && !dataB.isActive) return -1;
+            if (!dataA.isActive && dataB.isActive) return 1;
+
+            // 2. Sort by Recency (Newest first)
+            return dataB.maxReceived - dataA.maxReceived;
+        });
         resultsContainer.innerHTML = '';
 
         domains.forEach(domain => {
