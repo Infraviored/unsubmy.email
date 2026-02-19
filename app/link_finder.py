@@ -26,7 +26,7 @@ def resolve_redirect(url):
         if 'deref-gmx.net' in parsed_url.netloc or 'deref-web.de' in parsed_url.netloc:
             query_params = parse_qs(parsed_url.query)
             if 'redirectUrl' in query_params:
-                return html.unescape(query_params['redirectUrl'][0])
+                return query_params['redirectUrl'][0]
     except Exception:
         # Ignore parsing errors and return original url
         pass
@@ -37,7 +37,7 @@ def find_unsubscribe_links(html_content):
     Finds unsubscribe links in an HTML content.
     Returns a list of dictionaries, each with 'text' and 'href'.
     """
-    soup = BeautifulSoup(html_content, 'html.parser')
+    soup = BeautifulSoup(html_content, 'lxml')
     links = {}
 
     for a in soup.find_all('a', href=True):
@@ -53,9 +53,8 @@ def find_unsubscribe_links(html_content):
         href_match = any(re.search(r'\b' + re.escape(keyword) + r'\b', link_href, re.IGNORECASE) for keyword in ALL_KEYWORDS)
 
         if text_match or href_match:
-            # Clean and resolve the URL
-            cleaned_href = html.unescape(link_href)
-            resolved_href = resolve_redirect(cleaned_href)
+            # Resolved the URL (lxml already handles basic entity unescaping in attributes)
+            resolved_href = resolve_redirect(link_href)
             
             # Use link_text if available, otherwise use the URL itself
             display_text = link_text if link_text else resolved_href
@@ -76,7 +75,7 @@ def find_unsubscribe_links(html_content):
         for url_match in matches:
             url = url_match[0]
             if url.startswith('http'):
-                resolved_href = resolve_redirect(html.unescape(url))
+                resolved_href = resolve_redirect(url)
                 links[resolved_href] = {'text': 'List-Unsubscribe', 'href': resolved_href}
 
     return list(links.values())

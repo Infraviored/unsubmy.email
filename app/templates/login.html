@@ -4,50 +4,59 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login / Register - unsubmy.email</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <div class="container">
-        <div class="form-container">
-            <div class="form-toggle">
-                <button id="login-toggle" class="active">Login</button>
-                <button id="register-toggle">Register</button>
+    <header class="main-header">
+        <div class="container header-content">
+            <a href="/" class="logo">unsubmy.email</a>
+        </div>
+    </header>
+
+    <div class="container" style="display: flex; justify-content: center; padding-top: 60px;">
+        <div class="card" style="width: 100%; max-width: 400px;">
+            <div style="display: flex; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                <button id="login-toggle" class="btn btn-secondary" style="flex: 1; border: none; background: transparent; border-bottom: 2px solid var(--primary); border-radius: 0;">Login</button>
+                <button id="register-toggle" class="btn btn-secondary" style="flex: 1; border: none; background: transparent; border-bottom: 2px solid transparent; border-radius: 0; color: var(--text-muted);">Register</button>
             </div>
 
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
-                    <ul class="flash-messages">
+                    <div style="margin-bottom: 20px;">
                     {% for category, message in messages %}
-                        <li class="{{ category }}">{{ message }}</li>
+                        <div class="card" style="padding: 10px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: var(--danger); text-align: center;">{{ message }}</div>
                     {% endfor %}
-                    </ul>
+                    </div>
                 {% endif %}
             {% endwith %}
 
             <form id="login-form" method="post" action="{{ url_for('login') }}">
-                <h2>Login</h2>
-                <div class="form-group">
-                    <label for="login-email">Email</label>
+                <h2 style="text-align: center;">Welcome Back</h2>
+                <div style="margin-bottom: 15px;">
+                    <label for="login-email" style="display: block; margin-bottom: 5px; color: var(--text-muted);">Email</label>
                     <input type="email" name="email" id="login-email" required>
                 </div>
-                <div class="form-group">
-                    <label for="login-password">Password</label>
+                <div style="margin-bottom: 20px;">
+                    <label for="login-password" style="display: block; margin-bottom: 5px; color: var(--text-muted);">Password</label>
                     <input type="password" name="password" id="login-password" required>
                 </div>
-                <button type="submit" class="form-submit">Login</button>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
             </form>
 
-            <form id="register-form" method="post" action="{{ url_for('register') }}" style="display:none;">
-                <h2>Register</h2>
-                <div class="form-group">
-                    <label for="register-email">Email</label>
+            <form id="register-form" method="post" action="{{ url_for('register') }}" class="hidden">
+                <h2 style="text-align: center;">Create Account</h2>
+                <div style="margin-bottom: 15px;">
+                    <label for="register-email" style="display: block; margin-bottom: 5px; color: var(--text-muted);">Email</label>
                     <input type="email" name="email" id="register-email" required>
                 </div>
-                <div class="form-group">
-                    <label for="register-password">Password</label>
+                <div style="margin-bottom: 20px;">
+                    <label for="register-password" style="display: block; margin-bottom: 5px; color: var(--text-muted);">Password</label>
                     <input type="password" name="password" id="register-password" required>
                 </div>
-                <button type="submit" class="form-submit">Register</button>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Register</button>
             </form>
         </div>
     </div>
@@ -58,19 +67,26 @@
     const loginForm = document.getElementById('login-form');
     const registerForm = document.getElementById('register-form');
 
-    loginToggle.addEventListener('click', () => {
-        loginToggle.classList.add('active');
-        registerToggle.classList.remove('active');
-        loginForm.style.display = 'block';
-        registerForm.style.display = 'none';
-    });
+    function switchTab(isLogin) {
+        if (isLogin) {
+            loginToggle.style.color = '#fff';
+            loginToggle.style.borderBottomColor = 'var(--primary)';
+            registerToggle.style.color = 'var(--text-muted)';
+            registerToggle.style.borderBottomColor = 'transparent';
+            loginForm.classList.remove('hidden');
+            registerForm.classList.add('hidden');
+        } else {
+            registerToggle.style.color = '#fff';
+            registerToggle.style.borderBottomColor = 'var(--primary)';
+            loginToggle.style.color = 'var(--text-muted)';
+            loginToggle.style.borderBottomColor = 'transparent';
+            registerForm.classList.remove('hidden');
+            loginForm.classList.add('hidden');
+        }
+    }
 
-    registerToggle.addEventListener('click', () => {
-        registerToggle.classList.add('active');
-        loginToggle.classList.remove('active');
-        registerForm.style.display = 'block';
-        loginForm.style.display = 'none';
-    });
+    loginToggle.addEventListener('click', () => switchTab(true));
+    registerToggle.addEventListener('click', () => switchTab(false));
 </script>
 </body>
-</html> 
+</html>

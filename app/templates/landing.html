@@ -3,73 +3,49 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>unsubmy.email - Reclaim Your Inbox</title>
+    <title>Unsubmy.email - Reclaim Your Inbox</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <style>
-        .hero {
-            text-align: center;
-            padding: 80px 20px;
-        }
-        .hero h1 {
-            font-size: 3rem;
-            margin-bottom: 20px;
-        }
-        .hero p {
-            font-size: 1.25rem;
-            color: #6c757d;
-            margin-bottom: 40px;
-        }
-        .cta-button {
-            display: inline-block;
-            padding: 15px 30px;
-            font-size: 1.2rem;
-            color: #fff;
-            background-color: #007bff;
-            border: none;
-            border-radius: 5px;
-            text-decoration: none;
-            transition: background-color 0.3s ease;
-        }
-        .cta-button:hover {
-            background-color: #0056b3;
-        }
-        .features {
-            padding: 60px 20px;
-            display: flex;
-            justify-content: center;
-            gap: 40px;
-        }
-        .feature-item {
-            max-width: 300px;
-            text-align: center;
-        }
-        .feature-item h3 {
-            margin-bottom: 15px;
-        }
-    </style>
 </head>
 <body>
-    <div class="container">
+    <header class="main-header">
+        <div class="container header-content">
+            <a href="/" class="logo">unsubmy.email</a>
+            <div>
+                {% if current_user.is_authenticated %}
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Dashboard</a>
+                {% else %}
+                    <a href="{{ url_for('login') }}" class="btn btn-secondary">Login</a>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+
+    <div class="container" style="text-align: center; padding-top: 80px;">
         <div class="hero">
             <h1>Reclaim Your Inbox.</h1>
-            <p>Tired of endless promotional emails? unsubmy.email scans your inbox for newsletters and subscriptions, gathering all unsubscribe links into one simple dashboard.</p>
-            <a href="{{ url_for('login') }}" class="cta-button">Get Started for Free</a>
+            <p style="font-size: 1.25rem; color: var(--text-muted); max-width: 600px; margin: 0 auto 40px auto;">
+                Tired of endless promotional emails? Unsubmy.email scans your inbox for newsletters and subscriptions, gathering all unsubscribe links into one simple dashboard.
+            </p>
+            <a href="{{ url_for('login') }}" class="btn btn-primary" style="font-size: 1.2rem; padding: 12px 30px;">Get Started for Free</a>
         </div>
 
-        <div class="features">
-            <div class="feature-item">
+        <div class="dashboard-grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top: 100px;">
+            <div class="card">
                 <h3>Secure & Private</h3>
-                <p>Connect your accounts with confidence. We use secure OAuth for Gmail and never store your passwords or email content. Your privacy is our top priority.</p>
+                <p style="color: var(--text-muted);">Connect your accounts with confidence. We use secure OAuth for Gmail and never store your passwords or email content.</p>
             </div>
-            <div class="feature-item">
+            <div class="card">
                 <h3>All in One Place</h3>
-                <p>Manage unsubscribe links from multiple email accounts in a single, unified interface. No more hunting through individual emails.</p>
+                <p style="color: var(--text-muted);">Manage unsubscribe links from multiple email accounts in a single, unified interface. No more hunting through individual emails.</p>
             </div>
-            <div class="feature-item">
+            <div class="card">
                 <h3>Smart & Efficient</h3>
-                <p>Our tool intelligently identifies subscription emails and alerts you if a sender ignores your unsubscribe request, helping you truly clean up your inbox.</p>
+                <p style="color: var(--text-muted);">Our tool intelligently identifies subscription emails and alerts you if a sender ignores your unsubscribe request.</p>
             </div>
         </div>
     </div>
 </body>
-</html> 
+</html>

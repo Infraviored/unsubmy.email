@@ -30,6 +30,7 @@ class LinkedAccount(db.Model):
     provider: Mapped[str] = mapped_column(String(50), nullable=False)
     imap_server: Mapped[str] = mapped_column(String(120), nullable=True)
     credentials: Mapped[str] = mapped_column(Text, nullable=True) # For storing encrypted credentials/tokens
+    last_scan_date: Mapped[datetime.datetime] = mapped_column(nullable=True)
     
     owner: Mapped["User"] = relationship(back_populates="accounts")
     unsubscribe_links: Mapped[list["UnsubscribeLink"]] = relationship(back_populates="linked_account", cascade="all, delete-orphan")

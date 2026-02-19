@@ -226,7 +226,8 @@ def get_accounts():
         {
             "email_address": acc.email_address, 
             "provider": acc.provider, 
-            "imap_server": acc.imap_server
+            "imap_server": acc.imap_server,
+            "last_scan_date": acc.last_scan_date.isoformat() if acc.last_scan_date else None
         } for acc in accounts
     ]
     return jsonify(safe_accounts)
@@ -298,7 +299,24 @@ def test_connection():
 @app.route('/api/unsubscribe_links', methods=['GET'])
 @login_required
 def get_unsubscribe_links():
-    links = db.session.query(UnsubscribeLink, LinkedAccount.email_address).join(LinkedAccount, UnsubscribeLink.linked_account_id == LinkedAccount.id).filter(UnsubscribeLink.user_id == current_user.id).order_by(UnsubscribeLink.unsubscribed.asc(), UnsubscribeLink.added_at.desc()).all()
+    query = db.session.query(UnsubscribeLink, LinkedAccount.email_address).join(LinkedAccount, UnsubscribeLink.linked_account_id == LinkedAccount.id).filter(UnsubscribeLink.user_id == current_user.id)
+
+    # Filter by category if provided
+    category = request.args.get('category')
+    if category == 'critical':
+        # Critical: Unsubscribed but received NEW email afterwards
+        # This is tricky in SQL directly without subqueries. 
+        # Ideally, we check if UnsubscribeLink with same list_name has unsubscribed_at < added_at of CURRENT link.
+        # But for now, let's just return all and let frontend filter, OR use simple logic:
+        # Critical = Unsubscribed is FALSE, but there exists ANOTHER link with same list_name where unsubscribed is TRUE
+        # implementing this in python for simplicity for now as dataset is small per user
+        pass 
+    elif category == 'handled':
+        query = query.filter(UnsubscribeLink.unsubscribed == True)
+    elif category == 'new':
+        query = query.filter(UnsubscribeLink.unsubscribed == False)
+
+    links = query.order_by(UnsubscribeLink.unsubscribed.asc(), UnsubscribeLink.added_at.desc()).all()
     
     links_data = []
     for link, email_address in links:
@@ -321,6 +339,8 @@ def log_unsubscribe():
     """Marks a specific unsubscribe link as actioned."""
     data = request.json
     link_href = data.get('href')
+    delete_others = data.get('delete_others', False)
+
     if not link_href:
         return jsonify({"status": "ERROR", "message": "Link href is required."}), 400
 
@@ -331,6 +351,19 @@ def log_unsubscribe():
         
     link.unsubscribed = True
     link.unsubscribed_at = datetime.datetime.now(timezone.utc)
+
+    if delete_others:
+        # Delete other links from the same list that are NOT unsubscribed
+        try:
+            db.session.query(UnsubscribeLink).filter(
+                UnsubscribeLink.user_id == current_user.id,
+                UnsubscribeLink.list_name == link.list_name,
+                UnsubscribeLink.id != link.id,
+                UnsubscribeLink.unsubscribed == False
+            ).delete()
+        except Exception as e:
+            logging.error(f"Error deleting other links for {link.list_name}: {e}")
+
     db.session.commit()
     return jsonify({"status": "OK"})
 
@@ -343,6 +376,16 @@ def scan():
     user_id = current_user.id # Get user_id while request context is active
     
     account = LinkedAccount.query.filter_by(email_address=email_address, user_id=user_id).first_or_404() # type: ignore
+
+    # Default logic: if no params, use smart scan
+    if not num_emails_str and not since_date_str:
+        if account.last_scan_date:
+            since_date_str = account.last_scan_date.strftime('%Y-%m-%d')
+            logging.info(f"Smart scan: using last scan date {since_date_str}")
+        else:
+            num_emails_str = "50" # Default for first scan
+            logging.info(f"Smart scan: first time, using default 50 emails")
+
 
     def generate_scan_progress(scan_user_id):
         with app.app_context():
@@ -403,8 +446,10 @@ def scan():
                                     existing_urls.add(url) # Add to set to handle duplicates within same scan
                                     new_links_found += 1
                         
-                        if new_links_found > 0:
-                            db.session.commit()
+                        # Always update last_scan_date on successful completion
+                        account.last_scan_date = datetime.datetime.now(timezone.utc)
+                        db.session.commit()
+
                         
                         all_user_links = db.session.query(UnsubscribeLink, LinkedAccount.email_address).join(LinkedAccount, UnsubscribeLink.linked_account_id == LinkedAccount.id).filter(UnsubscribeLink.user_id == scan_user_id).order_by(UnsubscribeLink.unsubscribed.asc(), UnsubscribeLink.added_at.desc()).all()
                         
