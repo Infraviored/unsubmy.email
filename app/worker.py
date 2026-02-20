@@ -40,7 +40,7 @@ async def run_scan(user_id, account_id, num_emails, since_date):
                 redis_manager.publish(progress_channel, json.dumps({"error": "Account not found"}))
                 return {"error": "Account not found"}
 
-            creds_dict = json.loads(account.credentials) if account.credentials else {}
+            creds_dict = account.get_credentials()
             password_or_creds = creds_dict if account.provider == 'gmail' else creds_dict.get('password')
 
             client = get_email_client(
@@ -87,20 +87,20 @@ async def run_scan(user_id, account_id, num_emails, since_date):
                                 if link_info.get('date'):
                                     try:
                                         new_link.added_at = datetime.datetime.fromisoformat(link_info['date'])
-                                    except: pass
+                                    except (ValueError, TypeError):
+                                        pass
                                     
                                 db.add(new_link)
                                 existing_urls.add(url)
                                 new_links_found += 1
-                    
-                    account.last_scan_date = datetime.datetime.now(timezone.utc)
-                    await db.commit()
-                    
-                    # Final update
-                    redis_manager.publish(progress_channel, json.dumps({'status': 'complete', 'new_links_found': new_links_found}))
                 else:
                     # Publish progress to Redis
                     redis_manager.publish(progress_channel, json.dumps(progress_update))
+            
+            # Final update AFTER loop finishes
+            account.last_scan_date = datetime.datetime.now(timezone.utc)
+            await db.commit()
+            redis_manager.publish(progress_channel, json.dumps({'status': 'complete', 'new_links_found': new_links_found}))
             
             client.logout()
             logger.info(f"Scan complete for user {user_id}. Found {new_links_found} links.")
@@ -108,5 +108,11 @@ async def run_scan(user_id, account_id, num_emails, since_date):
             
         except Exception as e:
             logger.exception("Task failed")
+            try:
+                await db.rollback()
+            except Exception:
+                logger.exception("Failed to rollback database session")
             redis_manager.publish(progress_channel, json.dumps({"error": str(e)}))
             return {"error": str(e)}
+        finally:
+            await db.close()

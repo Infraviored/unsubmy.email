@@ -11,8 +11,11 @@ import re
 import datetime
 from datetime import timezone
 import logging
+import asyncio
+import redis
 from contextlib import asynccontextmanager
 import bcrypt
+from app.worker import scan_emails_task
 
 from app.models import get_db, User, LinkedAccount, UnsubscribeLink, engine, Base
 from app.email_client import get_email_client
@@ -99,7 +102,10 @@ async def login_required(request: Request, user: User = Depends(get_current_user
     if not user or not user.is_authenticated:
         if request.url.path.startswith("/api/"):
             raise HTTPException(status_code=401, detail="Unauthorized")
-        return RedirectResponse(url="/login?error=Authentication required", status_code=status.HTTP_303_SEE_OTHER)
+        raise HTTPException(
+            status_code=status.HTTP_303_SEE_OTHER,
+            headers={"Location": "/login?error=Authentication required"}
+        )
     return user
 
 # --- Routes ---
@@ -129,7 +135,14 @@ async def login(
     
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     session_data = serializer.dumps(str(user.id))
-    response.set_cookie(key="session", value=session_data, httponly=True, max_age=3600*24*7)
+    response.set_cookie(
+        key="session", 
+        value=session_data, 
+        httponly=True, 
+        max_age=3600*24*7,
+        secure=True, 
+        samesite="lax"
+    )
     return response
 
 @app.post("/register")
@@ -143,6 +156,9 @@ async def register(
     if result.scalar_one_or_none():
         return RedirectResponse(url="/login?error=Email already registered", status_code=status.HTTP_303_SEE_OTHER)
     
+    if len(password) < 8:
+        return RedirectResponse(url="/login?error=Password must be at least 8 characters", status_code=status.HTTP_303_SEE_OTHER)
+
     new_user = User(email=email, password_hash=get_password_hash(password))
     db.add(new_user)
     await db.commit()
@@ -150,7 +166,14 @@ async def register(
     
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     session_data = serializer.dumps(str(new_user.id))
-    response.set_cookie(key="session", value=session_data, httponly=True, max_age=3600*24*7)
+    response.set_cookie(
+        key="session", 
+        value=session_data, 
+        httponly=True, 
+        max_age=3600*24*7,
+        secure=True, 
+        samesite="lax"
+    )
     return response
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -194,18 +217,15 @@ async def add_account(
     if result.scalar_one_or_none():
         return JSONResponse({"error": "Account already linked"}, status_code=400)
 
-    # For 'other' provider, we store password in credentials
-    creds = None
-    if provider == 'other':
-        creds = json.dumps({"password": data.get('password')})
-        
     new_acc = LinkedAccount(
         user_id=user.id,
         email_address=email,
         provider=provider,
-        imap_server=data.get('imap') or data.get('imap_server') if provider == 'other' else None,
-        credentials=creds
+        imap_server=data.get('imap') or data.get('imap_server') if provider == 'other' else None
     )
+    if provider == 'other':
+        new_acc.set_credentials({"password": data.get('password')})
+    
     db.add(new_acc)
     await db.commit()
     return {"status": "OK"}
@@ -224,16 +244,18 @@ async def update_account(
         return JSONResponse({"error": "Account not found"}, status_code=404)
         
     if 'password' in data and account.provider == 'other':
-        account.credentials = json.dumps({"password": data.get('password')})
-    if 'imap' in data and account.provider == 'other':
-        account.imap_server = data.get('imap')
+        account.set_credentials({"password": data.get('password')})
+    if ('imap' in data or 'imap_server' in data) and account.provider == 'other':
+        account.imap_server = data.get('imap') or data.get('imap_server')
         
     await db.commit()
     return {"status": "OK"}
 
+from fastapi import Query
+
 @app.delete("/api/accounts")
 async def delete_linked_account(
-    email: str,
+    email: str = Query(...),
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
@@ -251,10 +273,16 @@ async def test_connection(data: dict, user: User = Depends(login_required)):
     password = data.get('password')
     imap_server = data.get('imap')
     
-    client = get_email_client(provider, email, password, imap_server)
-    status_code, msg = client.connect()
-    client.logout()
-    return {"status": status_code, "message": msg}
+    try:
+        client = get_email_client(provider, email, password, imap_server)
+        status_code, msg = client.connect()
+        try:
+            client.logout()
+        except:
+            pass
+        return {"status": status_code, "message": msg}
+    except Exception as e:
+        return {"status": "ERROR", "message": str(e)}
 
 @app.post("/change_password")
 async def change_password(
@@ -266,6 +294,9 @@ async def change_password(
     if not verify_password(current_password, user.password_hash):
         return RedirectResponse(url="/dashboard?error=Current password incorrect", status_code=status.HTTP_303_SEE_OTHER)
     
+    if len(new_password) < 8:
+        return RedirectResponse(url="/dashboard?error=New password too short", status_code=status.HTTP_303_SEE_OTHER)
+
     user.password_hash = get_password_hash(new_password)
     await db.commit()
     return RedirectResponse(url="/dashboard?success=Password updated", status_code=status.HTTP_303_SEE_OTHER)
@@ -324,17 +355,23 @@ async def get_unsubscribe_links(
         has_unsub = False
         latest_unsub_date = None
         
+        def safely_parse_date(date_str):
+            try:
+                return datetime.datetime.fromisoformat(date_str)
+            except (ValueError, TypeError):
+                return datetime.datetime.min.replace(tzinfo=timezone.utc)
+
         for l in sender_links:
             if l['unsubscribed']:
                 has_unsub = True
-                dt = datetime.datetime.fromisoformat(l['unsubscribed_at'])
+                dt = safely_parse_date(l['unsubscribed_at'])
                 if not latest_unsub_date or dt > latest_unsub_date:
                     latest_unsub_date = dt
         
-        if has_unsub:
+        if has_unsub and latest_unsub_date:
             # Check for newer active emails
             has_newer_active = any(
-                not l['unsubscribed'] and datetime.datetime.fromisoformat(l['added_at']) > latest_unsub_date
+                not l['unsubscribed'] and safely_parse_date(l['added_at']) > latest_unsub_date
                 for l in sender_links
             )
             if has_newer_active:
@@ -385,7 +422,7 @@ async def log_unsubscribe(
                 UnsubscribeLink.user_id == user.id,
                 UnsubscribeLink.list_name == link.list_name,
                 UnsubscribeLink.id != link.id,
-                UnsubscribeLink.unsubscribed == False
+                UnsubscribeLink.unsubscribed.is_(False)
             )
         )
         await db.execute(d_stmt)
@@ -393,8 +430,6 @@ async def log_unsubscribe(
     await db.commit()
     return {"status": "OK"}
 
-import redis
-from app.worker import scan_emails_task
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 redis_client = redis.from_url(REDIS_URL)
@@ -422,13 +457,13 @@ async def scan(
         else:
             num_emails = "50"
 
-    # Trigger background task
-    scan_emails_task.delay(user.id, account.id, num_emails, since_date)
-
     async def generate_scan_progress():
         pubsub = redis_client.pubsub()
         channel = f"scan_progress_{user.id}_{account.id}"
         pubsub.subscribe(channel)
+        
+        # Trigger background task AFTER subscribing to avoid race condition
+        scan_emails_task.delay(user.id, account.id, num_emails, since_date)
         
         try:
             # We listen for messages on the redis channel
@@ -454,22 +489,44 @@ async def scan(
 # --- Google OAuth Routes ---
 
 @app.get("/google_login")
-async def google_login(request: Request):
+async def google_login(request: Request, user: User = Depends(login_required)):
     flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
         'client_secret.json',
         scopes=['https://www.googleapis.com/auth/gmail.readonly']
     )
     flow.redirect_uri = str(request.url_for('oauth2callback'))
-    authorization_url, state = flow.authorization_url(access_type='offline', include_granted_scopes='true')
-    # Save state in session (simplified for now)
+    
+    # Secure state validation
+    signed_state = serializer.dumps({"user_id": user.id})
+    authorization_url, _ = flow.authorization_url(
+        access_type='offline', 
+        include_granted_scopes='true',
+        state=signed_state
+    )
     return RedirectResponse(authorization_url)
 
 @app.get("/oauth2callback")
-async def oauth2callback(request: Request, code: str, state: str, user: User = Depends(login_required), db: AsyncSession = Depends(get_db)):
+async def oauth2callback(request: Request, code: str, state: str, db: AsyncSession = Depends(get_db)):
+    try:
+        payload = serializer.loads(state, max_age=900) # 15 min expiry
+        user_id = payload.get("user_id")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state payload")
+    
+    # Fetch user without requiring standard login_required dependency (which checks cookies)
+    stmt = select(User).where(User.id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found for OAuth state")
+
     flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
         'client_secret.json',
-        scopes=['https://www.googleapis.com/auth/gmail.readonly'],
-        state=state
+        scopes=['https://www.googleapis.com/auth/gmail.readonly']
     )
     flow.redirect_uri = str(request.url_for('oauth2callback'))
     flow.fetch_token(code=code)
@@ -493,17 +550,18 @@ async def oauth2callback(request: Request, code: str, state: str, user: User = D
         'client_secret': credentials.client_secret,
         'scopes': credentials.scopes
     })
-
     if not account:
         account = LinkedAccount(
             user_id=user.id,
             email_address=email,
             provider='gmail',
-            credentials=creds_json
         )
+        # Store OAuth token (encrypt it)
+        account.set_credentials(json.loads(google.oauth2.credentials.Credentials.to_json(credentials)))
         db.add(account)
     else:
-        account.credentials = creds_json
+        # Store OAuth token (encrypt it)
+        account.set_credentials(json.loads(google.oauth2.credentials.Credentials.to_json(credentials)))
     
     await db.commit()
     return RedirectResponse(url="/dashboard")

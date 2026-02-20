@@ -15,9 +15,9 @@ services:
     volumes:
       - ./client_secret.json:/app/client_secret.json:ro
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/unsubmyemail
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=a-secure-secret-key-for-sessions
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/unsubmyemail}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - SECRET_KEY=${SECRET_KEY:-vulnerable-default-key}
     depends_on:
       - db
       - redis
@@ -34,10 +34,12 @@ services:
       - 8.8.8.8
       - 8.8.4.4
     restart: always
+    volumes:
+      - ./client_secret.json:/app/client_secret.json:ro
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/unsubmyemail
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=a-secure-secret-key-for-sessions
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/unsubmyemail}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - SECRET_KEY=${SECRET_KEY:-vulnerable-default-key}
     depends_on:
       - db
       - redis
@@ -50,9 +52,9 @@ services:
     container_name: unsubmy-email-db
     restart: always
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=unsubmyemail
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-unsubmyemail}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:

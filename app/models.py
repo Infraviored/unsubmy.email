@@ -4,6 +4,9 @@ from sqlalchemy import String, Integer, Text, ForeignKey, UniqueConstraint, Date
 import datetime
 from datetime import timezone
 import os
+import base64
+import hashlib
+from cryptography.fernet import Fernet
 
 class Base(DeclarativeBase):
     pass
@@ -45,6 +48,32 @@ class LinkedAccount(Base):
     owner: Mapped["User"] = relationship(back_populates="accounts")
     unsubscribe_links: Mapped[list["UnsubscribeLink"]] = relationship(back_populates="linked_account", cascade="all, delete-orphan")
 
+    def _get_cipher(self):
+        secret = os.getenv("SECRET_KEY", "fallback-key-do-not-use-in-production")
+        key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
+        return Fernet(key)
+
+    def set_credentials(self, creds_dict: dict):
+        cipher = self._get_cipher()
+        creds_json = json.dumps(creds_dict)
+        self.credentials = cipher.encrypt(creds_json.encode()).decode()
+
+    def get_credentials(self) -> dict:
+        if not self.credentials:
+            return {}
+        cipher = self._get_cipher()
+        try:
+            import json
+            decrypted = cipher.decrypt(self.credentials.encode()).decode()
+            return json.loads(decrypted)
+        except Exception:
+            # Fallback for old plaintext data during transition
+            try:
+                import json
+                return json.loads(self.credentials)
+            except:
+                return {}
+
 class UnsubscribeLink(Base):
     __tablename__ = 'unsubscribe_link'
     __table_args__ = (UniqueConstraint('user_id', 'unsubscribe_url', name='_user_url_uc'),)
@@ -65,7 +94,8 @@ class UnsubscribeLink(Base):
 
 # Database session management
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/unsubmyemail")
-engine = create_async_engine(DATABASE_URL, echo=True)
+DATABASE_ECHO = os.getenv("DATABASE_ECHO", "false").lower() in ("true", "1", "yes")
+engine = create_async_engine(DATABASE_URL, echo=DATABASE_ECHO)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 async def get_db():
