@@ -13,6 +13,7 @@ import datetime
 from datetime import timezone
 import logging
 import asyncio
+import secrets
 import redis.asyncio as redis
 from werkzeug.security import check_password_hash
 from contextlib import asynccontextmanager
@@ -185,7 +186,7 @@ async def login(
         value=session_data, 
         httponly=True, 
         max_age=3600*24*7,
-        secure=request.url.scheme == "https", 
+        secure=True, 
         samesite="lax"
     )
     return response
@@ -217,7 +218,7 @@ async def register(
         value=session_data, 
         httponly=True, 
         max_age=3600*24*7,
-        secure=request.url.scheme == "https", 
+        secure=True, 
         samesite="lax"
     )
     return response
@@ -563,34 +564,34 @@ async def google_login(request: Request, user: User = Depends(login_required)):
     # Explicitly force HTTPS for the redirect URI
     flow.redirect_uri = str(request.url_for('oauth2callback')).replace("http://", "https://")
     
-    # Secure state validation
-    signed_state = serializer.dumps({"user_id": user.id})
+    # Step 1: Force Alphanumeric State (No periods, short length)
+    state = secrets.token_hex(16)
+    
     authorization_url, _ = flow.authorization_url(
         access_type='offline', 
         include_granted_scopes='true',
         prompt='consent',
-        state=signed_state
+        state=state
     )
-    return RedirectResponse(authorization_url)
+    
+    response = RedirectResponse(authorization_url)
+    # Step 2: The Parallel State Cookie (Hard-coded Secure)
+    response.set_cookie(
+        key="oauth_state",
+        value=state,
+        httponly=True,
+        max_age=900,
+        secure=True,
+        samesite="lax"
+    )
+    return response
 
 @app.get("/oauth2callback")
-async def oauth2callback(request: Request, code: str, state: str, db: AsyncSession = Depends(get_db)):
-    try:
-        payload = serializer.loads(state, max_age=900) # 15 min expiry
-        user_id = payload.get("user_id")
-    except Exception:
+async def oauth2callback(request: Request, code: str, state: str, user: User = Depends(login_required), db: AsyncSession = Depends(get_db)):
+    # Validate state against cookie
+    stored_state = request.cookies.get("oauth_state")
+    if not stored_state or stored_state != state:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
-
-    if not user_id:
-        raise HTTPException(status_code=400, detail="Invalid OAuth state payload")
-    
-    # Fetch user without requiring standard login_required dependency (which checks cookies)
-    stmt = select(User).where(User.id == user_id)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-    
-    if not user:
-        raise HTTPException(status_code=400, detail="User not found for OAuth state")
 
     flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
         'client_secret.json',
@@ -634,7 +635,7 @@ async def oauth2callback(request: Request, code: str, state: str, db: AsyncSessi
         value=session_data, 
         httponly=True, 
         max_age=3600*24*7,
-        secure=request.url.scheme == "https", 
+        secure=True, 
         samesite="lax"
     )
     return response
