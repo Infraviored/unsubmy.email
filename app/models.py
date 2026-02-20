@@ -50,7 +50,12 @@ class LinkedAccount(Base):
     unsubscribe_links: Mapped[list["UnsubscribeLink"]] = relationship(back_populates="linked_account", cascade="all, delete-orphan")
 
     def _get_cipher(self):
-        secret = os.getenv("SECRET_KEY", "fallback-key-do-not-use-in-production")
+        secret = os.getenv("SECRET_KEY")
+        if not secret or secret == "change-me-in-production":
+            import logging
+            logging.warning("SECRET_KEY not set or using insecure default. Credentials may be easily compromised!")
+            secret = secret or "fallback-key-do-not-use-in-production"
+        
         key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
         return Fernet(key)
 
@@ -64,13 +69,13 @@ class LinkedAccount(Base):
             return {}
         cipher = self._get_cipher()
         try:
-            import json
             decrypted = cipher.decrypt(self.credentials.encode()).decode()
             return json.loads(decrypted)
         except Exception:
             # Fallback for old plaintext data during transition
             try:
-                import json
+                import logging
+                logging.warning(f"Using plaintext fallback for account {self.id}. Please re-link account to encrypt credentials.")
                 return json.loads(self.credentials)
             except:
                 return {}

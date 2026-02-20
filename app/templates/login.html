@@ -33,7 +33,7 @@
                 {% endif %}
             {% endwith %}
 
-            <form id="login-form" method="post" action="/login">
+            <form id="login-form" method="post" action="{{ url_for('login') }}">
                 <h2 style="text-align: center;">Welcome Back</h2>
                 <div style="margin-bottom: 15px;">
                     <label for="login-email" style="display: block; margin-bottom: 5px; color: var(--text-muted);">Email</label>
@@ -46,7 +46,7 @@
                 <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
             </form>
 
-            <form id="register-form" method="post" action="/register" class="hidden">
+            <form id="register-form" method="post" action="{{ url_for('register') }}" class="hidden">
                 <h2 style="text-align: center;">Create Account</h2>
                 <div style="margin-bottom: 15px;">
                     <label for="register-email" style="display: block; margin-bottom: 5px; color: var(--text-muted);">Email</label>

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.models import AsyncSessionLocal, User, LinkedAccount, UnsubscribeLink
 from app.email_client import get_email_client
 import os
-import redis
+import redis.asyncio as redis
 import logging
 
 # Setup Logging
@@ -29,6 +29,7 @@ async def run_scan(user_id, account_id, num_emails, since_date):
     progress_channel = f"scan_progress_{user_id}_{account_id}"
     
     async with AsyncSessionLocal() as db:
+        client = None
         try:
             # Fetch account
             result = await db.execute(
@@ -37,14 +38,14 @@ async def run_scan(user_id, account_id, num_emails, since_date):
             account = result.scalar_one_or_none()
             if not account:
                 logger.error("Account not found")
-                redis_manager.publish(progress_channel, json.dumps({"error": "Account not found"}))
+                await redis_manager.publish(progress_channel, json.dumps({"error": "Account not found"}))
                 return {"error": "Account not found"}
 
             creds_dict = account.get_credentials()
             if not creds_dict or (account.provider != 'gmail' and not creds_dict.get('password')):
                 err_msg = "Missing credentials or password for account"
                 logger.error(err_msg)
-                redis_manager.publish(progress_channel, json.dumps({"error": err_msg}))
+                await redis_manager.publish(progress_channel, json.dumps({"error": err_msg}))
                 return {"error": err_msg}
 
             password_or_creds = creds_dict if account.provider == 'gmail' else creds_dict.get('password')
@@ -58,7 +59,7 @@ async def run_scan(user_id, account_id, num_emails, since_date):
             status_code, msg = client.connect()
             if status_code == "ERROR":
                 logger.error(f"Connection failed: {msg}")
-                redis_manager.publish(progress_channel, json.dumps({"error": f"Connection failed: {msg}"}))
+                await redis_manager.publish(progress_channel, json.dumps({"error": f"Connection failed: {msg}"}))
                 return {"error": msg}
 
             scan_params = {}
@@ -71,6 +72,7 @@ async def run_scan(user_id, account_id, num_emails, since_date):
             existing_urls = set(e_result.scalars().all())
 
             new_links_found = 0
+            new_links_to_add = []
             
             # scan_emails is a synchronous generator
             for progress_update in client.scan_emails(**scan_params):
@@ -96,19 +98,21 @@ async def run_scan(user_id, account_id, num_emails, since_date):
                                     except (ValueError, TypeError):
                                         pass
                                     
-                                db.add(new_link)
+                                new_links_to_add.append(new_link)
                                 existing_urls.add(url)
                                 new_links_found += 1
                 else:
                     # Publish progress to Redis
-                    redis_manager.publish(progress_channel, json.dumps(progress_update))
+                    await redis_manager.publish(progress_channel, json.dumps(progress_update))
             
+            if new_links_to_add:
+                db.add_all(new_links_to_add)
+
             # Final update AFTER loop finishes
             account.last_scan_date = datetime.datetime.now(timezone.utc)
             await db.commit()
-            redis_manager.publish(progress_channel, json.dumps({'status': 'complete', 'new_links_found': new_links_found}))
+            await redis_manager.publish(progress_channel, json.dumps({'status': 'complete', 'new_links_found': new_links_found}))
             
-            client.logout()
             logger.info(f"Scan complete for user {user_id}. Found {new_links_found} links.")
             return {"status": "complete", "new_links_found": new_links_found}
             
@@ -118,5 +122,11 @@ async def run_scan(user_id, account_id, num_emails, since_date):
                 await db.rollback()
             except Exception:
                 logger.exception("Failed to rollback database session")
-            redis_manager.publish(progress_channel, json.dumps({"error": str(e)}))
+            await redis_manager.publish(progress_channel, json.dumps({"error": str(e)}))
             return {"error": str(e)}
+        finally:
+            if client:
+                try:
+                    client.logout()
+                except Exception:
+                    pass

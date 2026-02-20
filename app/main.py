@@ -12,10 +12,12 @@ import datetime
 from datetime import timezone
 import logging
 import asyncio
-import redis
+import redis.asyncio as redis
+from werkzeug.security import check_password_hash
 from contextlib import asynccontextmanager
 import bcrypt
 from app.worker import scan_emails_task
+from app.schemas import AccountAdd, AccountUpdate, UnsubscribeBase, PasswordChange
 
 from app.models import get_db, User, LinkedAccount, UnsubscribeLink, engine, Base
 from app.email_client import get_email_client
@@ -52,9 +54,17 @@ def get_password_hash(password: str) -> str:
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
-        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+        # Try bcrypt first (new format)
+        if hashed_password.startswith('$2b$') or hashed_password.startswith('$2a$'):
+            return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+        # Try werkzeug (old format)
+        return check_password_hash(hashed_password, plain_password)
     except Exception:
+        logger.exception("Password verification failed")
         return False
+
+# Pre-calculated dummy hash for timing attack protection
+DUMMY_HASH = get_password_hash("dummy_password")
 
 # Mock user for Jinja (similar to Flask-Login AnonymousUser)
 class AnonymousUser:
@@ -79,8 +89,8 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     return user
 
 def render_template(request: Request, name: str, context: dict | None = None):
-    context = context or {}
     """Helper to match Flask style and inject common vars"""
+    context = context or {}
     # Simple flash message handling via query param for now
     error = request.query_params.get("error")
     success = request.query_params.get("success")
@@ -133,10 +143,16 @@ async def login(
     user = result.scalar_one_or_none()
     
     user_exists = user is not None
-    password_correct = verify_password(password, user.password_hash) if user_exists else verify_password(password, "dummy_hash")
+    password_correct = verify_password(password, user.password_hash) if user_exists else verify_password(password, DUMMY_HASH)
     
     if not user_exists or not password_correct:
-        return RedirectResponse(url="/login?error=Invalid email or password", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url="/login?error=Invalid%20email%20or%20password", status_code=status.HTTP_303_SEE_OTHER)
+    
+    # Migration: Upgrade hash if it's the old format
+    if not user.password_hash.startswith('$2b$') and not user.password_hash.startswith('$2a$'):
+        logger.info(f"Upgrading password hash for user {user.email}")
+        user.password_hash = get_password_hash(password)
+        await db.commit()
     
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     session_data = serializer.dumps(str(user.id))
@@ -203,18 +219,12 @@ async def get_accounts(user: User = Depends(login_required), db: AsyncSession = 
 
 @app.post("/api/accounts")
 async def add_account(
-    data: dict,
+    data: AccountAdd,
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
-    # data can contain email (or email_address), password, imap (or imap_server), provider
-    email = data.get('email') or data.get('email_address')
-    provider = data.get('provider')
-    
-    if not email or not provider:
-        return JSONResponse({"error": "Missing email or provider"}, status_code=400)
-    
-    email = email.lower()
+    email = data.email_address.lower()
+    provider = data.provider
     
     # Check if already exists for this user
     result = await db.execute(
@@ -227,14 +237,12 @@ async def add_account(
         user_id=user.id,
         email_address=email,
         provider=provider,
-        imap_server=data.get('imap') or data.get('imap_server') if provider == 'other' else None
+        imap_server=data.imap_server if provider == 'other' else None
     )
     if provider == 'other':
-        password = data.get('password')
-        imap = data.get('imap') or data.get('imap_server')
-        if not password or not imap:
+        if not data.password or not data.imap_server:
             return JSONResponse({"error": "IMAP server and password are required for custom accounts"}, status_code=400)
-        new_acc.set_credentials({"password": password})
+        new_acc.set_credentials({"password": data.password})
     
     db.add(new_acc)
     await db.commit()
@@ -242,24 +250,21 @@ async def add_account(
 
 @app.patch("/api/accounts")
 async def update_account(
-    data: dict,
+    data: AccountUpdate,
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
-    email = data.get('email')
-    if not email:
-        return JSONResponse({"error": "Email is required"}, status_code=400)
-    email = email.lower()
+    email = data.email_address.lower()
     stmt = select(LinkedAccount).where(LinkedAccount.user_id == user.id, LinkedAccount.email_address == email)
     result = await db.execute(stmt)
     account = result.scalar_one_or_none()
     if not account:
         return JSONResponse({"error": "Account not found"}, status_code=404)
         
-    if 'password' in data and account.provider == 'other':
-        account.set_credentials({"password": data.get('password')})
-    if ('imap' in data or 'imap_server' in data) and account.provider == 'other':
-        account.imap_server = data.get('imap') or data.get('imap_server')
+    if data.password and account.provider == 'other':
+        account.set_credentials({"password": data.password})
+    if data.imap_server and account.provider == 'other':
+        account.imap_server = data.imap_server
         
     await db.commit()
     return {"status": "OK"}
@@ -276,11 +281,11 @@ async def delete_linked_account(
     return {"status": "OK"}
 
 @app.post("/api/test_connection")
-async def test_connection(data: dict, user: User = Depends(login_required)):
-    provider = data.get('provider')
-    email = data.get('email')
-    password = data.get('password')
-    imap_server = data.get('imap')
+async def test_connection(data: AccountAdd, user: User = Depends(login_required)):
+    provider = data.provider
+    email = data.email_address
+    password = data.password
+    imap_server = data.imap_server
     
     try:
         client = get_email_client(provider, email, password, imap_server)
@@ -290,25 +295,25 @@ async def test_connection(data: dict, user: User = Depends(login_required)):
         except Exception:
             pass
         return {"status": status_code, "message": msg}
-    except Exception as e:
-        return {"status": "ERROR", "message": str(e)}
+    except Exception:
+        logger.exception("Connection test failed")
+        return {"status": "ERROR", "message": "Failed to connect to email server"}
 
 @app.post("/change_password")
 async def change_password(
-    current_password: str = Form(...),
-    new_password: str = Form(...),
+    data: PasswordChange = Depends(),
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
-    if not verify_password(current_password, user.password_hash):
-        return RedirectResponse(url="/dashboard?error=Current password incorrect", status_code=status.HTTP_303_SEE_OTHER)
+    if not verify_password(data.current_password, user.password_hash):
+        return RedirectResponse(url="/dashboard?error=Current%20password%20incorrect", status_code=status.HTTP_303_SEE_OTHER)
     
-    if len(new_password) < 8:
-        return RedirectResponse(url="/dashboard?error=New password too short", status_code=status.HTTP_303_SEE_OTHER)
+    if len(data.new_password) < 8:
+        return RedirectResponse(url="/dashboard?error=New%20password%20too%20short", status_code=status.HTTP_303_SEE_OTHER)
 
-    user.password_hash = get_password_hash(new_password)
+    user.password_hash = get_password_hash(data.new_password)
     await db.commit()
-    return RedirectResponse(url="/dashboard?success=Password updated", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/dashboard?success=Password%20updated", status_code=status.HTTP_303_SEE_OTHER)
 
 @app.post("/delete_account")
 async def delete_account(
@@ -323,22 +328,25 @@ async def delete_account(
 
 @app.get("/api/unsubscribe_links")
 async def get_unsubscribe_links(
+    email_address: Optional[str] = None,
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
-    # Fetch all links with email address joined
-    # In SQLAlchemy 2.0 async, we use select()
+    # Fetch links for the user, optionally filtered by account email
     stmt = (
         select(UnsubscribeLink, LinkedAccount.email_address)
         .join(LinkedAccount, UnsubscribeLink.linked_account_id == LinkedAccount.id)
         .where(UnsubscribeLink.user_id == user.id)
     )
+    if email_address:
+        stmt = stmt.where(LinkedAccount.email_address == email_address.lower())
+        
     result = await db.execute(stmt)
     rows = result.all()
 
     # Grouping Logic (Server-side)
     links_by_sender = {}
-    for link, email_address in rows:
+    for link, acc_email in rows:
         if link.list_name not in links_by_sender:
             links_by_sender[link.list_name] = []
         links_by_sender[link.list_name].append({
@@ -349,7 +357,7 @@ async def get_unsubscribe_links(
             "added_at": link.added_at.isoformat(),
             "unsubscribed": link.unsubscribed,
             "unsubscribed_at": link.unsubscribed_at.isoformat() if link.unsubscribed_at else None,
-            "account_email": email_address
+            "account_email": acc_email
         })
 
     critical = {}
@@ -405,15 +413,12 @@ async def get_unsubscribe_links(
 
 @app.post("/api/unsubscribe")
 async def log_unsubscribe(
-    data: dict,
+    data: UnsubscribeBase,
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
-    link_href = data.get('href')
-    if not link_href:
-        return JSONResponse({"error": "Missing unsubscribe URL"}, status_code=400)
-    
-    delete_others = data.get('delete_others', False)
+    link_href = data.href
+    delete_others = data.delete_others
     
     stmt = select(UnsubscribeLink).where(UnsubscribeLink.user_id == user.id, UnsubscribeLink.unsubscribe_url == link_href)
     result = await db.execute(stmt)
@@ -470,7 +475,10 @@ async def scan(
     async def generate_scan_progress():
         pubsub = redis_client.pubsub()
         channel = f"scan_progress_{user.id}_{account.id}"
-        pubsub.subscribe(channel)
+        await pubsub.subscribe(channel)
+        
+        # Give Redis a brief moment to fully establish the subscription
+        await asyncio.sleep(0.1)
         
         # Trigger background task AFTER subscribing to avoid race condition
         scan_emails_task.delay(user.id, account.id, num_emails, since_date)
@@ -480,7 +488,11 @@ async def scan(
             # Timeout after 5 minutes of no activity
             start_time = datetime.datetime.now()
             while (datetime.datetime.now() - start_time).total_seconds() < 300:
-                message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if await request.is_disconnected():
+                    logger.info(f"Client disconnected for user {user.id}")
+                    break
+                    
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 if message:
                     data = message['data'].decode('utf-8')
                     yield f"data: {data}\n\n"
@@ -490,9 +502,11 @@ async def scan(
                     if msg_json.get('status') == 'complete' or msg_json.get('error'):
                         break
                 await asyncio.sleep(0.1)
+        except Exception:
+            logger.exception("Error in scan progress generator")
         finally:
-            pubsub.unsubscribe(channel)
-            pubsub.close()
+            await pubsub.unsubscribe(channel)
+            await pubsub.close()
 
     return StreamingResponse(generate_scan_progress(), media_type="text/event-stream")
 
@@ -566,7 +580,19 @@ async def oauth2callback(request: Request, code: str, state: str, db: AsyncSessi
         account.set_credentials(json.loads(google.oauth2.credentials.Credentials.to_json(credentials)))
     
     await db.commit()
-    return RedirectResponse(url="/dashboard")
+    
+    # After successful OAuth, ensure a session exists for the user
+    session_data = serializer.dumps(str(user.id))
+    response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+    response.set_cookie(
+        key="session", 
+        value=session_data, 
+        httponly=True, 
+        max_age=3600*24*7,
+        secure=request.url.scheme == "https", 
+        samesite="lax"
+    )
+    return response
 
 @app.get("/logout")
 async def logout():

@@ -251,32 +251,15 @@
 
         async function fetchLinks() {
             if(!currentAccount) return;
-            const response = await fetch('/api/unsubscribe_links');
+            const response = await fetch(`/api/unsubscribe_links?email_address=${encodeURIComponent(currentAccount.email_address)}`);
             const data = await response.json();
             
-            // The API returns {critical, inbox, handled, counts}
-            // Each section is an object { [sender]: [links...] }
-            // We need to ensure we only show links for the CURRENT selected account
+            // The API now returns grouped data filtered for the requested account
             const filteredData = {
-                critical: new Map(),
-                inbox: new Map(),
-                handled: new Map()
+                critical: new Map(Object.entries(data.critical)),
+                inbox: new Map(Object.entries(data.inbox)),
+                handled: new Map(Object.entries(data.handled))
             };
-
-            const accountEmail = currentAccount.email_address;
-
-            Object.entries(data.critical).forEach(([sender, links]) => {
-                const accLinks = links.filter(l => l.account_email === accountEmail);
-                if (accLinks.length > 0) filteredData.critical.set(sender, accLinks);
-            });
-            Object.entries(data.inbox).forEach(([sender, links]) => {
-                const accLinks = links.filter(l => l.account_email === accountEmail);
-                if (accLinks.length > 0) filteredData.inbox.set(sender, accLinks);
-            });
-            Object.entries(data.handled).forEach(([sender, links]) => {
-                const accLinks = links.filter(l => l.account_email === accountEmail);
-                if (accLinks.length > 0) filteredData.handled.set(sender, accLinks);
-            });
 
             renderLinks(filteredData);
         }
@@ -476,18 +459,17 @@
              const email = document.getElementById('other-email').value;
              const password = document.getElementById('other-password').value;
              const imap = document.getElementById('other-imap').value;
-             
-             try {
-                 const response = await fetch('/api/accounts', {
-                     method: 'POST',
-                     headers: {'Content-Type': 'application/json'},
-                     body: JSON.stringify({
-                         email: email,
-                         password: password,
-                         provider: 'other',
-                         imap: imap
-                     })
-                 });
+                          try {
+                  const response = await fetch('/api/accounts', {
+                      method: 'POST',
+                      headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({
+                          email_address: email,
+                          password: password,
+                          provider: 'other',
+                          imap_server: imap
+                      })
+                  });
                  if (response.ok) {
                      window.location.reload();
                  } else {
