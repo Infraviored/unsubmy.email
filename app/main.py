@@ -60,6 +60,11 @@ class RedirectException(Exception):
 async def redirect_exception_handler(request: Request, exc: RedirectException):
     return RedirectResponse(url=exc.url, status_code=status.HTTP_303_SEE_OTHER)
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    from fastapi import Response
+    return Response(status_code=204)
+
 # --- Auth & Hashing ---
 DEFAULT_KEY = "a-secure-secret-key-for-sessions-fallback-123"
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -549,7 +554,7 @@ async def scan(
 
 # --- Google OAuth Routes ---
 
-@app.get("/google_login")
+@app.get("/login/google")
 async def google_login(request: Request, user: User = Depends(login_required)):
     flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
         'client_secret.json',
