@@ -62,8 +62,7 @@ async def redirect_exception_handler(request: Request, exc: RedirectException):
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    from fastapi import Response
-    return Response(status_code=204)
+    return RedirectResponse(url="/static/favicon.png")
 
 # --- Auth & Hashing ---
 DEFAULT_KEY = "a-secure-secret-key-for-sessions-fallback-123"

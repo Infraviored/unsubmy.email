@@ -27,18 +27,26 @@ celery.conf.update(
     worker_concurrency=int(os.getenv("CELERY_WORKER_CONCURRENCY", "4")),
 )
 
-# Redis client for progress publishing
-redis_manager = redis.from_url(REDIS_URL)
+# We will create the redis manager inside the task to avoid event loop issues
 
 @celery.task(name='scan_emails')
 def scan_emails_task(user_id, account_id, num_emails=None, since_date=None):
     return asyncio.run(run_scan(user_id, account_id, num_emails, since_date))
 
 async def run_scan(user_id, account_id, num_emails, since_date):
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from app.models import DATABASE_URL, DATABASE_ECHO
+    # Create an ephemeral engine for this event loop to avoid cross-loop issues in Celery
+    engine = create_async_engine(DATABASE_URL, echo=DATABASE_ECHO)
+    LocalSession = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    
     logger.info(f"Starting scan for user {user_id}, account {account_id}")
     progress_channel = f"scan_progress_{user_id}_{account_id}"
     
-    async with AsyncSessionLocal() as db:
+    # Create a fresh redis manager for this loop
+    redis_manager = redis.from_url(REDIS_URL)
+    
+    async with LocalSession() as db:
         client = None
         try:
             # Fetch account
@@ -140,3 +148,7 @@ async def run_scan(user_id, account_id, num_emails, since_date):
                     client.logout()
                 except Exception:
                     pass
+            # Clean up redis connection
+            await redis_manager.close()
+            # Crucial: Dispose engine connections to avoid cross-loop issues in next task
+            await engine.dispose()
