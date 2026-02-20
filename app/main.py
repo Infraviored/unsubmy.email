@@ -37,6 +37,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="unsubmy.email", lifespan=lifespan)
 
+@app.middleware("http")
+async def https_middleware(request: Request, call_next):
+    if request.headers.get("x-forwarded-proto") == "https":
+        request.scope["scheme"] = "https"
+    response = await call_next(request)
+    return response
+
 # Static files & Templates
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
@@ -54,11 +61,12 @@ async def redirect_exception_handler(request: Request, exc: RedirectException):
     return RedirectResponse(url=exc.url, status_code=status.HTTP_303_SEE_OTHER)
 
 # --- Auth & Hashing ---
+DEFAULT_KEY = "a-secure-secret-key-for-sessions-fallback-123"
 SECRET_KEY = os.getenv("SECRET_KEY")
-if not SECRET_KEY:
-    raise RuntimeError("SECRET_KEY environment variable must be set for session security.")
-if SECRET_KEY == "a-secure-secret-key-for-sessions" or SECRET_KEY == "change-me-in-production":
-    raise RuntimeError("SECRET_KEY environment variable is using an insecure default value.")
+
+if not SECRET_KEY or SECRET_KEY in ["a-secure-secret-key-for-sessions", "change-me-in-production"]:
+    logger.warning("SECRET_KEY is not set or using insecure default. Credentials may be easily compromised!")
+    SECRET_KEY = SECRET_KEY or DEFAULT_KEY
 
 serializer = URLSafeTimedSerializer(SECRET_KEY)
 

@@ -10,4 +10,4 @@ COPY . .
 
 EXPOSE 9090
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9090", "--proxy-headers"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9090", "--proxy-headers", "--forwarded-allow-ips", "*"]

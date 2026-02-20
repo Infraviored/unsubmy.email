@@ -51,10 +51,10 @@ class LinkedAccount(Base):
 
     def _get_cipher(self):
         secret = os.getenv("SECRET_KEY")
-        if not secret or secret == "change-me-in-production":
+        if not secret or secret in ["change-me-in-production", "a-secure-secret-key-for-sessions"]:
             import logging
             logging.warning("SECRET_KEY not set or using insecure default. Credentials may be easily compromised!")
-            secret = secret or "fallback-key-do-not-use-in-production"
+            secret = secret or "a-secure-secret-key-for-sessions-fallback-123"
         
         key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
         return Fernet(key)
