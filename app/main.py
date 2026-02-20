@@ -300,9 +300,21 @@ async def delete_linked_account(
     db: AsyncSession = Depends(get_db)
 ):
     email = email.lower()
-    stmt = delete(LinkedAccount).where(LinkedAccount.user_id == user.id, LinkedAccount.email_address == email)
-    await db.execute(stmt)
-    await db.commit()
+    # First, get the account to find its ID
+    stmt = select(LinkedAccount).where(LinkedAccount.user_id == user.id, LinkedAccount.email_address == email)
+    result = await db.execute(stmt)
+    account = result.scalar_one_or_none()
+    
+    if account:
+        # 1. Delete associated unsubscribe links
+        del_links_stmt = delete(UnsubscribeLink).where(UnsubscribeLink.linked_account_id == account.id)
+        await db.execute(del_links_stmt)
+        
+        # 2. Delete the account itself
+        del_account_stmt = delete(LinkedAccount).where(LinkedAccount.id == account.id)
+        await db.execute(del_account_stmt)
+        
+        await db.commit()
     return {"status": "OK"}
 
 @app.post("/api/test_connection")
@@ -502,7 +514,7 @@ async def scan(
         if account.last_scan_date:
             since_date = account.last_scan_date.strftime('%Y-%m-%d')
         else:
-            num_emails = 50
+            num_emails = 1000
 
     async def generate_scan_progress():
         pubsub = redis_client.pubsub()

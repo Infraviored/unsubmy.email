@@ -41,7 +41,7 @@ class EmailProvider(ABC):
             self.mail.logout()
             logging.info(f"Disconnected from {self.email_address}")
 
-    def scan_emails(self, num_emails: int = 50, since_uid: str | None = None, since_date: str | None = None, **kwargs):
+    def scan_emails(self, num_emails: int = 1000, since_uid: str | None = None, since_date: str | None = None, **kwargs):
         # This implementation can be shared across all IMAP-based providers
         if not self.mail:
             logging.error("Scan attempt failed: Not connected to the email server.")
@@ -249,7 +249,7 @@ class GmailProvider(EmailProvider):
         self.service = None
         logging.info("Disconnected from Gmail (no action needed).")
 
-    def scan_emails(self, num_emails: int = 50, since_date: str | None = None, **kwargs):
+    def scan_emails(self, num_emails: int = 1000, since_date: str | None = None, **kwargs):
         if not self.service:
             logging.error("Scan attempt failed: Not connected to the Gmail API.")
             yield {"status": "error", "message": "Not connected to the Gmail API."}
