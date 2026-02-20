@@ -24,6 +24,27 @@ services:
     networks:
       - proxy-network
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: unsubmy-email-worker
+    command: celery -A app.worker.celery worker --loglevel=info
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/unsubmyemail
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=a-secure-secret-key-for-sessions
+    depends_on:
+      - db
+      - redis
+    networks:
+      - proxy-network
+
+
   db:
     image: postgres:15-alpine
     container_name: unsubmy-email-db

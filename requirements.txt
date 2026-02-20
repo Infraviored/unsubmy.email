@@ -16,4 +16,5 @@ itsdangerous
 cryptography
 python-jose[cryptography]
 bcrypt
-
+celery
+redis

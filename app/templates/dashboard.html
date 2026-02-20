@@ -204,6 +204,8 @@
                     const updated = accounts.find(a => a.email_address === currentAccount.email_address);
                     if (updated) selectAccount(updated);
                 }
+            } else {
+                updateScanButtonState();
             }
         }
 
@@ -222,6 +224,7 @@
             currentAccount = account;
             renderAccounts();
             fetchLinks();
+            updateScanButtonState();
             // Update last scan text
             const lastScanText = document.getElementById('last-scan-text');
             if (account.last_scan_date) {
@@ -229,6 +232,20 @@
                 lastScanText.textContent = `Last scan: ${date.toLocaleString()}`;
             } else {
                 lastScanText.textContent = `Last scan: Never`;
+            }
+        }
+
+        function updateScanButtonState() {
+            const btn = document.getElementById('smart-scan-btn');
+            if (accounts.length === 0) {
+                btn.innerHTML = '<i class="fa-solid fa-plus"></i> Add Account First';
+                btn.className = 'btn btn-secondary';
+            } else if (!currentAccount) {
+                btn.innerHTML = '<i class="fa-solid fa-mouse-pointer"></i> Select Account';
+                btn.className = 'btn btn-secondary';
+            } else {
+                btn.innerHTML = '<i class="fa-solid fa-radar"></i> Start Smart Scan';
+                btn.className = 'btn btn-primary';
             }
         }
 
@@ -394,6 +411,14 @@
 
         async function startSmartScan() {
             if (scanning) return;
+            if (accounts.length === 0) {
+                document.getElementById('add-account-modal').style.display = 'flex';
+                return;
+            }
+            if (!currentAccount) {
+                alert('Please select an account from the sidebar.');
+                return;
+            }
             scanning = true;
             const btn = document.getElementById('smart-scan-btn');
             btn.disabled = true;
@@ -441,7 +466,7 @@
             scanning = false;
             const btn = document.getElementById('smart-scan-btn');
             btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-radar"></i> Start Scan';
+            updateScanButtonState();
             setTimeout(() => {
                 document.getElementById('scan-status-container').classList.add('hidden');
             }, 5000);
@@ -452,17 +477,26 @@
              const password = document.getElementById('other-password').value;
              const imap = document.getElementById('other-imap').value;
              
-             await fetch('/api/accounts', {
-                 method: 'POST',
-                 headers: {'Content-Type': 'application/json'},
-                 body: JSON.stringify({
-                     email_address: email,
-                     password: password,
-                     provider: 'other',
-                     imap_server: imap
-                 })
-             });
-             window.location.reload();
+             try {
+                 const response = await fetch('/api/accounts', {
+                     method: 'POST',
+                     headers: {'Content-Type': 'application/json'},
+                     body: JSON.stringify({
+                         email: email,
+                         password: password,
+                         provider: 'other',
+                         imap: imap
+                     })
+                 });
+                 if (response.ok) {
+                     window.location.reload();
+                 } else {
+                     const err = await response.json();
+                     alert('Error: ' + (err.error || 'Failed to add account'));
+                 }
+             } catch (e) {
+                 alert('Network error adding account.');
+             }
         }
 
         function escapeHtml(text) {

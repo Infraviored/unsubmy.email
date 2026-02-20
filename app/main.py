@@ -178,9 +178,14 @@ async def add_account(
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
-    # data can contain email, password, imap, provider
-    email = data.get('email').lower()
+    # data can contain email (or email_address), password, imap (or imap_server), provider
+    email = data.get('email') or data.get('email_address')
     provider = data.get('provider')
+    
+    if not email or not provider:
+        return JSONResponse({"error": "Missing email or provider"}, status_code=400)
+    
+    email = email.lower()
     
     # Check if already exists for this user
     result = await db.execute(
@@ -198,7 +203,7 @@ async def add_account(
         user_id=user.id,
         email_address=email,
         provider=provider,
-        imap_server=data.get('imap') if provider == 'other' else None,
+        imap_server=data.get('imap') or data.get('imap_server') if provider == 'other' else None,
         credentials=creds
     )
     db.add(new_acc)
@@ -388,6 +393,12 @@ async def log_unsubscribe(
     await db.commit()
     return {"status": "OK"}
 
+import redis
+from app.worker import scan_emails_task
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+redis_client = redis.from_url(REDIS_URL)
+
 @app.get("/scan")
 async def scan(
     email_address: str,
@@ -411,69 +422,32 @@ async def scan(
         else:
             num_emails = "50"
 
+    # Trigger background task
+    scan_emails_task.delay(user.id, account.id, num_emails, since_date)
+
     async def generate_scan_progress():
+        pubsub = redis_client.pubsub()
+        channel = f"scan_progress_{user.id}_{account.id}"
+        pubsub.subscribe(channel)
+        
         try:
-            creds_dict = json.loads(account.credentials) if account.credentials else {}
-            password_or_creds = creds_dict if account.provider == 'gmail' else creds_dict.get('password')
-
-            client = get_email_client(
-                account.provider, 
-                account.email_address, 
-                password_or_creds, 
-                account.imap_server
-            )
-            status_code, msg = client.connect()
-            if status_code == "ERROR":
-                yield f'data: {json.dumps({"error": f"Connection failed: {msg}"})}\n\n'
-                return
-
-            scan_params = {}
-            if num_emails: scan_params['num_emails'] = int(num_emails)
-            if since_date: scan_params['since_date'] = since_date
-            
-            # This is synchronous and blocks. Phase 2 will move this to a worker.
-            for progress_update in client.scan_emails(**scan_params):
-                if 'links' in progress_update:
-                    new_links_payload = progress_update.get('links', {})
-                    new_links_found = 0
-
-                    # Use a fresh session for mutations inside the generator if needed, 
-                    # but since we're in the same thread (for now), we use the one from depends
+            # We listen for messages on the redis channel
+            # Timeout after 5 minutes of no activity
+            start_time = datetime.datetime.now()
+            while (datetime.datetime.now() - start_time).total_seconds() < 300:
+                message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message:
+                    data = message['data'].decode('utf-8')
+                    yield f"data: {data}\n\n"
                     
-                    # Optimization: get existing urls
-                    e_stmt = select(UnsubscribeLink.unsubscribe_url).where(UnsubscribeLink.user_id == user.id)
-                    e_result = await db.execute(e_stmt)
-                    existing_urls = set(e_result.scalars().all())
-
-                    for domain, links_list in new_links_payload.items():
-                        for link_info in links_list:
-                            url = link_info['href']
-                            if url not in existing_urls:
-                                new_link = UnsubscribeLink(
-                                    user_id=user.id,
-                                    linked_account_id=account.id,
-                                    list_name=link_info.get('from', domain),
-                                    unsubscribe_url=url,
-                                    subject=link_info.get('subject'),
-                                    link_text=link_info.get('text'),
-                                    added_at=datetime.datetime.fromisoformat(link_info['date']) if link_info.get('date') else datetime.datetime.now(timezone.utc)
-                                )
-                                db.add(new_link)
-                                existing_urls.add(url)
-                                new_links_found += 1
-                    
-                    account.last_scan_date = datetime.datetime.now(timezone.utc)
-                    await db.commit()
-                    
-                    # Return summary - dashboard will re-fetch links via API
-                    yield f"data: {json.dumps({'status': 'complete', 'new_links_found': new_links_found})}\n\n"
-                else:
-                    yield f"data: {json.dumps(progress_update)}\n\n"
-            
-            client.logout()
-        except Exception as e:
-            logger.error(f"Scan error: {e}")
-            yield f'data: {json.dumps({"error": str(e)})}\n\n'
+                    # If it's complete or error, stop
+                    msg_json = json.loads(data)
+                    if msg_json.get('status') == 'complete' or msg_json.get('error'):
+                        break
+                await asyncio.sleep(0.1)
+        finally:
+            pubsub.unsubscribe(channel)
+            pubsub.close()
 
     return StreamingResponse(generate_scan_progress(), media_type="text/event-stream")
 
