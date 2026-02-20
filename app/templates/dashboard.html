@@ -198,6 +198,25 @@
             document.getElementById('google-login-btn').addEventListener('click', () => window.location.href = '/login/google');
             document.getElementById('other-connect-btn').addEventListener('click', handleAddOtherAccount);
 
+            // Auto-lookup IMAP
+            document.getElementById('other-email').addEventListener('blur', async (e) => {
+                const email = e.target.value;
+                const imapInput = document.getElementById('other-imap');
+                if (email && email.includes('@') && !imapInput.value) {
+                    try {
+                        const response = await fetch(`/api/lookup_imap?email=${encodeURIComponent(email)}`);
+                        const data = await response.json();
+                        if (data.host) {
+                            imapInput.value = data.host;
+                            imapInput.style.borderColor = 'var(--primary)';
+                            setTimeout(() => imapInput.style.borderColor = '', 1000);
+                        }
+                    } catch (err) {
+                        console.error('Failed to lookup IMAP', err);
+                    }
+                }
+            });
+
             // Unsub Logic
             document.getElementById('unsub-confirm-yes').addEventListener('click', confirmUnsubscribe);
             document.getElementById('unsub-confirm-no').addEventListener('click', () => {
@@ -371,7 +390,10 @@
                 header.style.justifyContent = 'space-between';
                 header.style.alignItems = 'center';
                 header.style.marginBottom = '10px';
-                header.innerHTML = `<h4 style="margin:0;">${escapeHtml(senderName)} <small style="color:var(--text-muted); font-weight:normal; margin-left:10px;">(${items.length} email${items.length > 1 ? 's' : ''})</small></h4>`;
+                header.innerHTML = `
+                    <h4 style="margin:0;">${escapeHtml(senderName)} <small style="color:var(--text-muted); font-weight:normal; margin-left:10px;">(${items.length} email${items.length > 1 ? 's' : ''})</small></h4>
+                    ${type !== 'handled' ? `<button class="btn btn-secondary btn-sm" onclick="handleWhitelistClick('${escapeHtml(senderName)}')"><i class="fa-solid fa-shield-heart"></i> Trust Sender</button>` : ''}
+                `;
                 
                 groupEl.appendChild(header);
 
@@ -461,6 +483,42 @@
             }
         }
 
+        window.handleWhitelistClick = async (domain) => {
+             const modal = document.getElementById('confirm-modal');
+             const title = document.getElementById('confirm-modal-title');
+             const message = document.getElementById('confirm-modal-message');
+             const yesBtn = document.getElementById('confirm-modal-yes');
+             const noBtn = document.getElementById('confirm-modal-no');
+
+             title.textContent = 'Trust Sender';
+             message.textContent = `Are you sure you want to trust ${domain}? This domain will be excluded from all future scans and removed from your current lists.`;
+             
+             modal.style.display = 'flex';
+
+             const cleanup = () => {
+                 modal.style.display = 'none';
+                 yesBtn.onclick = null;
+                 noBtn.onclick = null;
+             };
+
+             noBtn.onclick = cleanup;
+             yesBtn.onclick = async () => {
+                 cleanup();
+                 try {
+                     const response = await fetch(`/api/whitelist?domain=${encodeURIComponent(domain)}`, {
+                         method: 'POST'
+                     });
+                     if (response.ok) {
+                         fetchLinks();
+                     } else {
+                         alert('Failed to whitelist domain.');
+                     }
+                 } catch (e) {
+                     alert('Contacting server failed.');
+                 }
+             };
+        };
+
         async function startSmartScan() {
             if (scanning) return;
             if (accounts.length === 0) {
@@ -496,11 +554,10 @@
                 if(data.status === 'progress') {
                     const pct = (data.progress / data.total) * 100;
                     progressBar.style.width = `${pct}%`;
-                    statusText.textContent = `Scanning: ${data.current_email_subject || ''}`;
+                    statusText.textContent = `Scanning ${data.progress} of ${data.total}...`; // Minimal status
                 } else if (data.status === 'complete') {
                     progressBar.style.width = '100%';
                     statusText.textContent = `Scan Complete. Found ${data.new_links_found} new links.`;
-                    statusText.classList.add('text-success');
                     eventSource.close();
                     await fetchAccounts(); // Re-fetch to get updated last_scan_date
                     fetchLinks();

@@ -4,7 +4,7 @@ import datetime
 from datetime import timezone
 from celery import Celery
 from sqlalchemy import select
-from app.models import AsyncSessionLocal, User, LinkedAccount, UnsubscribeLink
+from app.models import AsyncSessionLocal, User, LinkedAccount, UnsubscribeLink, WhitelistedDomain
 from app.email_client import get_email_client
 import os
 import redis.asyncio as redis
@@ -89,6 +89,11 @@ async def run_scan(user_id, account_id, num_emails, since_date):
             e_result = await db.execute(e_stmt)
             existing_urls = set(e_result.scalars().all())
 
+            # Get whitelisted domains
+            w_stmt = select(WhitelistedDomain.domain).where(WhitelistedDomain.user_id == user_id)
+            w_result = await db.execute(w_stmt)
+            whitelisted = set(w_result.scalars().all())
+
             new_links_found = 0
             new_links_to_add = []
             
@@ -97,6 +102,8 @@ async def run_scan(user_id, account_id, num_emails, since_date):
                 if 'links' in progress_update:
                     new_links_payload = progress_update.get('links', {})
                     for domain, links_list in new_links_payload.items():
+                        if domain in whitelisted:
+                            continue
                         for link_info in links_list:
                             url = link_info['href']
                             if url not in existing_urls:

@@ -20,6 +20,7 @@ class User(Base):
     
     accounts: Mapped[list["LinkedAccount"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     unsubscribe_links: Mapped[list["UnsubscribeLink"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    whitelisted_domains: Mapped[list["WhitelistedDomain"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
     @property
     def is_authenticated(self):
@@ -97,6 +98,17 @@ class UnsubscribeLink(Base):
 
     user: Mapped["User"] = relationship(back_populates="unsubscribe_links") 
     linked_account: Mapped["LinkedAccount"] = relationship(back_populates="unsubscribe_links")
+
+class WhitelistedDomain(Base):
+    __tablename__ = 'whitelisted_domain'
+    __table_args__ = (UniqueConstraint('user_id', 'domain', name='_user_domain_uc'),)
+    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('user.id'), nullable=False)
+    domain: Mapped[str] = mapped_column(String(255), nullable=False)
+    added_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.datetime.now(timezone.utc), nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="whitelisted_domains")
 
 # Database session management
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/unsubmyemail")

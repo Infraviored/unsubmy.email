@@ -18,10 +18,12 @@ import redis.asyncio as redis
 from werkzeug.security import check_password_hash
 from contextlib import asynccontextmanager
 import bcrypt
+import requests
+import xml.etree.ElementTree as ET
 from app.worker import scan_emails_task
 from app.schemas import AccountAdd, AccountUpdate, UnsubscribeBase, PasswordChange
 
-from app.models import get_db, User, LinkedAccount, UnsubscribeLink, engine, Base
+from app.models import get_db, User, LinkedAccount, UnsubscribeLink, WhitelistedDomain, engine, Base
 from app.email_client import get_email_client
 
 import google.oauth2.credentials
@@ -381,6 +383,12 @@ async def get_unsubscribe_links(
         .join(LinkedAccount, UnsubscribeLink.linked_account_id == LinkedAccount.id)
         .where(UnsubscribeLink.user_id == user.id)
     )
+
+    # Exclude whitelisted domains
+    w_stmt = select(WhitelistedDomain.domain).where(WhitelistedDomain.user_id == user.id)
+    w_result = await db.execute(w_stmt)
+    whitelisted = set(w_result.scalars().all())
+
     if email_address:
         stmt = stmt.where(LinkedAccount.email_address == email_address.lower())
         
@@ -390,6 +398,10 @@ async def get_unsubscribe_links(
     # Grouping Logic (Server-side)
     links_by_sender = {}
     for link, acc_email in rows:
+        # Check if list_name (domain) is whitelisted
+        if link.list_name in whitelisted:
+            continue
+
         if link.list_name not in links_by_sender:
             links_by_sender[link.list_name] = []
         links_by_sender[link.list_name].append({
@@ -487,6 +499,78 @@ async def log_unsubscribe(
         
     await db.commit()
     return {"status": "OK"}
+
+@app.post("/api/whitelist")
+async def whitelist_domain(
+    domain: str = Query(...),
+    user: User = Depends(login_required),
+    db: AsyncSession = Depends(get_db)
+):
+    domain = domain.lower()
+    # Check if already whitelisted
+    stmt = select(WhitelistedDomain).where(WhitelistedDomain.user_id == user.id, WhitelistedDomain.domain == domain)
+    result = await db.execute(stmt)
+    if result.scalar_one_or_none():
+        return {"status": "OK", "message": "Already whitelisted"}
+
+    new_w = WhitelistedDomain(user_id=user.id, domain=domain)
+    db.add(new_w)
+    
+    # Also delete existing entries for this domain so they disappear from the dashboard
+    # This ensures they don't show up in handled either
+    del_stmt = delete(UnsubscribeLink).where(UnsubscribeLink.user_id == user.id, UnsubscribeLink.list_name == domain)
+    await db.execute(del_stmt)
+    
+    await db.commit()
+    return {"status": "OK"}
+
+@app.get("/api/lookup_imap")
+async def lookup_imap(email: str = Query(...)):
+    if not email or '@' not in email:
+        return {"host": ""}
+        
+    domain = email.split('@')[-1].lower()
+    
+    common = {
+        "outlook.com": "outlook.office365.com",
+        "hotmail.com": "outlook.office365.com",
+        "hotmail.de": "outlook.office365.com",
+        "live.com": "outlook.office365.com",
+        "msn.com": "outlook.office365.com",
+        "yahoo.com": "imap.mail.yahoo.com",
+        "yahoo.de": "imap.mail.yahoo.com",
+        "icloud.com": "imap.mail.me.com",
+        "me.com": "imap.mail.me.com",
+        "mac.com": "imap.mail.me.com",
+        "aol.com": "imap.aol.com",
+        "zoho.com": "imap.zoho.com",
+        "gmx.net": "imap.gmx.net",
+        "gmx.de": "imap.gmx.net",
+        "web.de": "imap.web.de",
+    }
+    
+    if domain in common:
+        return {"host": common[domain]}
+        
+    def try_mozilla(d):
+        try:
+            url = f"https://autoconfig.thunderbird.net/v1.1/{d}"
+            r = requests.get(url, timeout=5)
+            if r.status_code == 200:
+                root = ET.fromstring(r.content)
+                for server in root.findall(".//incomingServer[@type='imap']"):
+                    hostname = server.find("hostname")
+                    if hostname is not None:
+                        return hostname.text
+        except Exception as e:
+            logger.error(f"Mozilla autoconfig error for {d}: {e}")
+        return None
+
+    host = await asyncio.to_thread(try_mozilla, domain)
+    if host:
+        return {"host": host}
+        
+    return {"host": f"imap.{domain}"}
 
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
