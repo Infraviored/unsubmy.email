@@ -1,73 +1,70 @@
 # unsubmy.email Roadmap
 
-This document outlines the planned features and improvements for **unsubmy.email**. The roadmap is divided into several phases, focusing on moving from a functional prototype to a robust, user-friendly, and secure application.
+Current Stack: **FastAPI (Async)** | **PostgreSQL** | **Redis** | **Celery** | **Vanilla JS/Jinja2**
 
-## Phase 1: Core Functionality & Usability (In Progress)
+This roadmap tracks the evolution of unsubmy.email from its current robust backend state to a premium, modern SaaS product.
 
-This phase focuses on building a solid foundation and a usable interface.
+---
 
--   [x] **1.1: Basic Email Scanning**
-    -   [x] Connect to IMAP servers.
-    -   [x] Connect to Gmail via OAuth2.
-    -   [x] Scan for and extract unsubscribe links.
-    -   [x] Basic web interface to display results.
-    -   [x] Store account credentials securely on the server.
+## ✅ Completed Foundations
+- [x] **FastAPI Migration**: Fully async backend with dependency injection.
+- [x] **Infrastructure**: Dockerized environment with PostgreSQL and Redis.
+- [x] **Background Tasks**: Celery worker implementation for non-blocking email scanning.
+- [x] **Real-time UX**: SSE (Server-Sent Events) for live scan progress.
+- [x] **Database Architecture**: Relationship-based schema for Users, Accounts, and Links.
 
--   [x] **1.2: Professional Landing & User System**
-    -   [x] Create a professional, welcoming landing page for new users (`landing.html`).
-    -   [x] Implement a full user account system (Login/Registration).
-    -   [x] Move the core application to a protected dashboard (`dashboard.html`).
-    -   [x] Migrate all data storage (linked accounts, scan results) from JSON files to a proper database (SQLite).
-    -   [x] Associate all data with the logged-in user.
+---
 
--   [ ] **1.3: Real-time Progress & Feedback**
-    -   [x] Implement a real-time progress bar during email scans using server-sent events (SSE).
-    -   [ ] Add more detailed status updates (e.g., "Scanning folder X", "Found Y links").
-    -   [ ] Provide clearer error messages on the frontend if a scan fails.
+## 🚀 Phase 1: Security Hardening & Logic Refinement (High Priority)
+*Focus: Protecting user data and fixing "sub-optimal" legacy logic.*
 
--   [ ] **1.4: Enhanced Unsubscribe Tracking**
-    -   [ ] Add a mechanism to mark links as "clicked" or "unsubscribed".
-    -   [ ] Persist the "clicked" state in the database.
-    -   [ ] Visually distinguish clicked links in the UI (e.g., grayed out, strikethrough).
-    -   [ ] Add an option to hide unsubscribed-from domains from future scan results.
+- [ ] **1.1: Credential Encryption (Low-Hanging Fruit)**
+    - Encrypt `LinkedAccount.credentials` at rest using `cryptography` (AES-256).
+    - Implement a rotating `ENCRYPTION_KEY` via environment variables.
+- [ ] **1.2: Truly Async Email Client**
+    - The current `email_client.py` uses synchronous `imaplib`.
+    - **Optimization**: Shift to an async library or optimize thread-pooling in Celery to prevent worker starvation during high-volume scans.
+- [ ] **1.3: Robust Token Management**
+    - Implement automatic OAuth2 token refreshing (Gmail/Google) to prevent "Connection Expired" errors.
+- [ ] **1.4: API Validation (Pydantic)**
+    - Fully utilize Pydantic models for all incoming request payloads to ensure type safety.
 
-## Phase 2: Security & Production Readiness
+---
 
-This phase is about making the application secure, stable, and ready for deployment.
+## 🎨 Phase 2: Frontend Modernization (The React Shift)
+*Focus: Replacing brittle Vanilla JS/Jinja2 with a modern, maintainable Component Architecture.*
 
--   [ ] **2.1: Security Hardening**
-    -   [ ] Encrypt all sensitive credentials stored in the database (e.g., IMAP passwords, OAuth refresh tokens) using a dedicated library like `cryptography`. **(High Priority)**
-    -   [ ] Implement CSRF (Cross-Site Request Forgery) protection on all forms and API endpoints.
-    -   [ ] Review and set appropriate CORS (Cross-Origin Resource Sharing) policies if the frontend and backend are ever separated.
-    -   [ ] Add rate-limiting to API endpoints to prevent abuse.
+- [ ] **2.1: Vite + React + Tailwind Setup**
+    - Initialize a modern frontend build system.
+    - Establish a Design System (Colors, Typography, Glassmorphism components).
+- [ ] **2.2: State Management (Zustand/React Query)**
+    - Replace globally-scoped JS arrays with a reliable state management layer.
+    - Use React Query for account/link synchronization and automatic caching.
+- [ ] **2.3: Dashboard Componentization**
+    - Break down the current single-template dashboard into reusable components: `AccountSidebar`, `ScanWidget`, `LinkList`, `FilterTabs`.
+- [ ] **2.4: Unified UI/UX Polish**
+    - Consistent Dark Mode support.
+    - Framer Motion for micro-animations (scanners, link deletions).
+    - Responsive mobile-first design.
 
--   [ ] **2.2: Configuration & Deployment**
-    -   [ ] Move all hardcoded settings (like client secrets, database URI) into a configuration file or environment variables.
-    -   [ ] Create a `Dockerfile` and `docker-compose.yml` for easy, containerized deployment.
-    -   [ ] Write a deployment guide for a production environment (e.g., using Gunicorn and Nginx).
+---
 
--   [ ] **2.3: Comprehensive Testing**
-    -   [ ] Add unit tests for the email client logic (`email_client.py`).
-    -   [ ] Add unit tests for the backend API endpoints (`web_server.py`).
-    -   [ ] Implement integration tests that simulate a full user flow (login -> add account -> scan -> view results).
+## 🧠 Phase 3: Intelligence & Efficiency
+*Focus: Automating the unsubscribe process and improving discovery.*
 
-## Phase 3: Advanced Features & User Experience
+- [ ] **3.1: "One-Click" List-Unsubscribe Support**
+    - Detect `List-Unsubscribe` headers (HTTP/Mailto).
+    - Implement "unsub on behalf" logic directly from the dashboard.
+- [ ] **3.2: AI-Powered Sender Categorization**
+    - Use basic LLM or heuristic analysis to group senders (e.g., "Marketing", "Newsletters", "Spam").
+- [ ] **3.3: Global Sender Reputation**
+    - Track senders that ignore unsubscribe requests and alert other users.
+- [ ] **3.4: Browser Extension**
+    - A companion extension to "unsub on fly" while reading emails in Gmail/Outlook browser tabs.
 
-This phase focuses on adding value and improving the overall user experience.
+---
 
--   [ ] **3.1: Outlook / Microsoft 365 OAuth Support**
-    -   [ ] Implement the OAuth2 flow for Microsoft accounts.
-    -   [ ] Create an `OutlookProvider` in `email_client.py` that uses the Microsoft Graph API.
-
--   [ ] **3.2: Automated & Scheduled Scanning**
-    -   [ ] Add an option for users to enable automatic background scanning on a schedule (e.g., once a week).
-    -   [ ] This will likely require a background job processor like Celery or APScheduler.
-
--   [ ] **3.3: "One-Click" Unsubscribe (Ambitious)**
-    -   [ ] Research the `List-Unsubscribe` email header, which often provides a `mailto:` or HTTP endpoint for direct, automated unsubscribing.
-    -   [ ] Implement functionality to attempt an automated unsubscribe action on behalf of the user, where possible. This is a significant feature and requires careful security and UX considerations.
-
--   [ ] **3.4: UI/UX Polish**
-    -   [ ] Add pagination or infinite scrolling for scan results with a large number of links.
-    -   [ ] Implement a "select all" feature for domains.
-    -   [ ] Improve the mobile responsiveness of the dashboard. 
+## 🛠 Low-Hanging Fruits (Next Steps)
+1. **Button UX Fix**: Ensure Dashboard buttons dynamically reflect states (e.g., "Add Account" if none exists).
+2. **Scan Logic Fix**: Don't allow scans on invalid/missing credentials.
+3. **Delete Logic**: Implement bulk deletion of selected senders.
