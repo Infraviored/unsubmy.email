@@ -65,6 +65,7 @@ async def favicon():
     return RedirectResponse(url="/static/favicon.png")
 
 # --- Auth & Hashing ---
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 DEFAULT_KEY = "a-secure-secret-key-for-sessions-fallback-123"
 SECRET_KEY = os.getenv("SECRET_KEY")
 
@@ -559,7 +560,8 @@ async def google_login(request: Request, user: User = Depends(login_required)):
         'client_secret.json',
         scopes=['https://www.googleapis.com/auth/gmail.readonly']
     )
-    flow.redirect_uri = str(request.url_for('oauth2callback'))
+    # Explicitly force HTTPS for the redirect URI
+    flow.redirect_uri = str(request.url_for('oauth2callback')).replace("http://", "https://")
     
     # Secure state validation
     signed_state = serializer.dumps({"user_id": user.id})
@@ -594,7 +596,8 @@ async def oauth2callback(request: Request, code: str, state: str, db: AsyncSessi
         'client_secret.json',
         scopes=['https://www.googleapis.com/auth/gmail.readonly']
     )
-    flow.redirect_uri = str(request.url_for('oauth2callback'))
+    # Explicitly force HTTPS for the redirect URI
+    flow.redirect_uri = str(request.url_for('oauth2callback')).replace("http://", "https://")
     flow.fetch_token(code=code)
     
     credentials = flow.credentials
