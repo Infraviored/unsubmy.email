@@ -99,6 +99,10 @@ async def run_scan(user_id, account_id, num_emails, since_date):
             
             # scan_emails is a synchronous generator
             for progress_update in client.scan_emails(**scan_params):
+                if progress_update.get('status') == 'error':
+                    await redis_manager.publish(progress_channel, json.dumps(progress_update))
+                    return progress_update
+                
                 if 'links' in progress_update:
                     new_links_payload = progress_update.get('links', {})
                     for domain, links_list in new_links_payload.items():

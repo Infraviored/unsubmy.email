@@ -9,11 +9,19 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
 </head>
 <body>
     <header class="main-header">
         <div class="container header-content">
-            <a href="{{ url_for('dashboard') }}" class="logo">unsubmy.email</a>
+            <a href="{{ url_for('dashboard') }}" class="logo">
+                <img src="/favicon.svg" alt="Logo" class="logo-icon">
+                unsubmy.email
+            </a>
             <div class="user-menu" style="display:flex; align-items:center; gap:20px;">
                 <span id="user-display" style="color:var(--text-muted); font-size:0.9rem;">
                    <i class="fa-solid fa-user"></i> {{ current_user.email }}
@@ -62,6 +70,7 @@
                         <div class="list-tab active" data-tab="critical">Critical <span id="badge-critical" class="badge badge-critical">0</span></div>
                         <div class="list-tab" data-tab="new">Inbox <span id="badge-new" class="badge badge-new">0</span></div>
                         <div class="list-tab" data-tab="handled">Handled <span id="badge-handled" class="badge badge-handled">0</span></div>
+                        <div class="list-tab" data-tab="subscribed">Subscribed <span id="badge-subscribed" class="badge badge-subscribed">0</span></div>
                     </div>
 
                     <div id="content-critical" class="tab-content">
@@ -76,6 +85,10 @@
                         <!-- Handled Items -->
                          <div class="email-list" id="list-handled"></div>
                     </div>
+                    <div id="content-subscribed" class="tab-content hidden">
+                        <!-- Subscribed Items -->
+                         <div class="email-list" id="list-subscribed"></div>
+                    </div>
                 </div>
             </main>
         </div>
@@ -88,14 +101,11 @@
             <h3>Did it work?</h3>
             <p>You clicked the unsubscribe link. Did you successfully unsubscribe on the sender's website?</p>
             
-            <div class="checkbox-wrapper">
-                <input type="checkbox" id="delete-others-check" checked>
-                <label for="delete-others-check">Also delete all other emails from this sender to clean up my list.</label>
-            </div>
+            <!-- Removed checkbox, default to yes -->
 
             <div class="modal-actions" style="display:flex; justify-content:center; gap:20px; margin-top:20px;">
                 <button id="unsub-confirm-yes" class="btn btn-primary">Yes, Unsubscribed</button>
-                <button id="unsub-confirm-no" class="btn btn-secondary">No, Something Broke</button>
+                <button id="unsub-confirm-no" class="btn btn-secondary">No, try another email</button>
             </div>
         </div>
     </div>
@@ -147,12 +157,14 @@
         const listContainer = {
             critical: document.getElementById('list-critical'),
             new: document.getElementById('list-new'),
-            handled: document.getElementById('list-handled')
+            handled: document.getElementById('list-handled'),
+            subscribed: document.getElementById('list-subscribed')
         };
         const badges = {
             critical: document.getElementById('badge-critical'),
             new: document.getElementById('badge-new'),
-            handled: document.getElementById('badge-handled')
+            handled: document.getElementById('badge-handled'),
+            subscribed: document.getElementById('badge-subscribed')
         };
         
         // Init
@@ -346,7 +358,8 @@
             const filteredData = {
                 critical: new Map(Object.entries(data.critical)),
                 inbox: new Map(Object.entries(data.inbox)),
-                handled: new Map(Object.entries(data.handled))
+                handled: new Map(Object.entries(data.handled)),
+                subscribed: new Map(Object.entries(data.subscribed))
             };
 
             renderLinks(filteredData);
@@ -356,6 +369,7 @@
             renderGroupedList(listContainer.critical, groupedData.critical, 'critical');
             renderGroupedList(listContainer.new, groupedData.inbox, 'new');
             renderGroupedList(listContainer.handled, groupedData.handled, 'handled');
+            renderGroupedList(listContainer.subscribed, groupedData.subscribed, 'subscribed');
 
             badges.critical.textContent = groupedData.critical.size;
             // Inbox badge shows total email count
@@ -363,6 +377,7 @@
             groupedData.inbox.forEach(links => inboxCount += links.length);
             badges.new.textContent = inboxCount;
             badges.handled.textContent = groupedData.handled.size;
+            badges.subscribed.textContent = groupedData.subscribed.size;
         }
 
         function renderGroupedList(container, groupsMap, type) {
@@ -392,7 +407,8 @@
                 header.style.marginBottom = '10px';
                 header.innerHTML = `
                     <h4 style="margin:0;">${escapeHtml(senderName)} <small style="color:var(--text-muted); font-weight:normal; margin-left:10px;">(${items.length} email${items.length > 1 ? 's' : ''})</small></h4>
-                    ${type !== 'handled' ? `<button class="btn btn-secondary btn-sm" onclick="handleWhitelistClick('${escapeHtml(senderName)}')"><i class="fa-solid fa-shield-heart"></i> Trust Sender</button>` : ''}
+                    ${type !== 'handled' && type !== 'subscribed' ? `<button class="btn btn-secondary btn-sm" onclick="handleSubscribeClick('${escapeHtml(senderName)}')"><i class="fa-solid fa-heart"></i> Subscribe</button>` : ''}
+                    ${type === 'subscribed' ? `<button class="btn btn-secondary btn-sm" onclick="handleUnsubscribeDomainClick('${escapeHtml(senderName)}')"><i class="fa-solid fa-heart-crack"></i> Remove from Subscribed</button>` : ''}
                 `;
                 
                 groupEl.appendChild(header);
@@ -462,7 +478,7 @@
         async function confirmUnsubscribe() {
             if (!currentLinkAction) return;
             
-            const deleteOthers = document.getElementById('delete-others-check').checked;
+            const deleteOthers = true; // Default to cleanup
             
             // Optimistic Update
             document.getElementById('unsub-modal').style.display = 'none';
@@ -483,15 +499,15 @@
             }
         }
 
-        window.handleWhitelistClick = async (domain) => {
+        window.handleSubscribeClick = async (domain) => {
              const modal = document.getElementById('confirm-modal');
              const title = document.getElementById('confirm-modal-title');
              const message = document.getElementById('confirm-modal-message');
              const yesBtn = document.getElementById('confirm-modal-yes');
              const noBtn = document.getElementById('confirm-modal-no');
 
-             title.textContent = 'Trust Sender';
-             message.textContent = `Are you sure you want to trust ${domain}? This domain will be excluded from all future scans and removed from your current lists.`;
+             title.textContent = 'Subscribe to Sender';
+             message.textContent = `Are you sure you want to subscribe to ${domain}? These emails will be moved to your 'Subscribed' tab and kept out of your inbox scan results.`;
              
              modal.style.display = 'flex';
 
@@ -505,13 +521,49 @@
              yesBtn.onclick = async () => {
                  cleanup();
                  try {
-                     const response = await fetch(`/api/whitelist?domain=${encodeURIComponent(domain)}`, {
+                     const response = await fetch(`/api/subscribe?domain=${encodeURIComponent(domain)}`, {
                          method: 'POST'
                      });
                      if (response.ok) {
                          fetchLinks();
                      } else {
-                         alert('Failed to whitelist domain.');
+                         alert('Failed to subscribe to domain.');
+                     }
+                 } catch (e) {
+                     alert('Contacting server failed.');
+                 }
+             };
+        };
+
+        window.handleUnsubscribeDomainClick = async (domain) => {
+             const modal = document.getElementById('confirm-modal');
+             const title = document.getElementById('confirm-modal-title');
+             const message = document.getElementById('confirm-modal-message');
+             const yesBtn = document.getElementById('confirm-modal-yes');
+             const noBtn = document.getElementById('confirm-modal-no');
+
+             title.textContent = 'Remove from Subscribed';
+             message.textContent = `Do you want to stop tracking ${domain} as a subscription? It will move back to your regular lists.`;
+             
+             modal.style.display = 'flex';
+
+             const cleanup = () => {
+                 modal.style.display = 'none';
+                 yesBtn.onclick = null;
+                 noBtn.onclick = null;
+             };
+
+             noBtn.onclick = cleanup;
+             yesBtn.onclick = async () => {
+                 cleanup();
+                 try {
+                     const response = await fetch(`/api/unsubscribe_domain?domain=${encodeURIComponent(domain)}`, {
+                         method: 'POST'
+                     });
+                     if (response.ok) {
+                         fetchLinks();
+                     } else {
+                         alert('Failed to remove domain.');
                      }
                  } catch (e) {
                      alert('Contacting server failed.');
@@ -582,10 +634,15 @@
         }
 
         async function handleAddOtherAccount() {
+             const btn = document.getElementById('other-connect-btn');
              const email = document.getElementById('other-email').value;
              const password = document.getElementById('other-password').value;
              const imap = document.getElementById('other-imap').value;
-                          try {
+             
+             btn.disabled = true;
+             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Connecting...';
+
+             try {
                   const response = await fetch('/api/accounts', {
                       method: 'POST',
                       headers: {'Content-Type': 'application/json'},
@@ -604,6 +661,9 @@
                  }
              } catch (e) {
                  alert('Network error adding account.');
+             } finally {
+                 btn.disabled = false;
+                 btn.textContent = 'Connect';
              }
         }
 

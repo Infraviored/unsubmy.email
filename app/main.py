@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, status, Form, Query
 from typing import Optional
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,8 +64,15 @@ async def redirect_exception_handler(request: Request, exc: RedirectException):
     return RedirectResponse(url=exc.url, status_code=status.HTTP_303_SEE_OTHER)
 
 @app.get("/favicon.ico", include_in_schema=False)
-async def favicon():
-    return RedirectResponse(url="/static/favicon.png")
+@app.get("/favicon.svg", include_in_schema=False)
+@app.get("/favicon-96x96.png", include_in_schema=False)
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.get("/site.webmanifest", include_in_schema=False)
+@app.get("/web-app-manifest-192x192.png", include_in_schema=False)
+@app.get("/web-app-manifest-512x512.png", include_in_schema=False)
+async def serve_favicon_files(request: Request):
+    path = request.url.path.lstrip('/')
+    return FileResponse(f"app/static/{path}")
 
 # --- Auth & Hashing ---
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
@@ -269,6 +276,13 @@ async def add_account(
     if provider == 'other':
         if not data.password or not data.imap_server:
             return JSONResponse({"error": "IMAP server and password are required for custom accounts"}, status_code=400)
+        
+        # Test connection before adding
+        client = get_email_client(provider, email, data.password, data.imap_server)
+        status_code, msg = client.connect()
+        if status_code == "ERROR":
+            return JSONResponse({"error": msg}, status_code=400)
+            
         new_acc.set_credentials({"password": data.password})
     
     db.add(new_acc)
@@ -288,10 +302,20 @@ async def update_account(
     if not account:
         return JSONResponse({"error": "Account not found"}, status_code=404)
         
-    if data.password and account.provider == 'other':
-        account.set_credentials({"password": data.password})
-    if data.imap_server and account.provider == 'other':
-        account.imap_server = data.imap_server
+    if account.provider == 'other' and (data.password or data.imap_server):
+        new_pw = data.password or account.get_credentials().get("password")
+        new_server = data.imap_server or account.imap_server
+        
+        # Test connection
+        client = get_email_client(account.provider, account.email_address, new_pw, new_server)
+        status_code, msg = client.connect()
+        if status_code == "ERROR":
+            return JSONResponse({"error": msg}, status_code=400)
+            
+        if data.password:
+            account.set_credentials({"password": data.password})
+        if data.imap_server:
+            account.imap_server = data.imap_server
         
     await db.commit()
     return {"status": "OK"}
@@ -395,13 +419,12 @@ async def get_unsubscribe_links(
     result = await db.execute(stmt)
     rows = result.all()
 
+    # Sort by date desc
+    rows.sort(key=lambda x: x[0].added_at, reverse=True)
+
     # Grouping Logic (Server-side)
     links_by_sender = {}
     for link, acc_email in rows:
-        # Check if list_name (domain) is whitelisted
-        if link.list_name in whitelisted:
-            continue
-
         if link.list_name not in links_by_sender:
             links_by_sender[link.list_name] = []
         links_by_sender[link.list_name].append({
@@ -418,11 +441,17 @@ async def get_unsubscribe_links(
     critical = {}
     inbox = {}
     handled = {}
+    subscribed = {}
 
     for sender, sender_links in links_by_sender.items():
         # Sort by date desc
         sender_links.sort(key=lambda x: x['added_at'], reverse=True)
         
+        # Check if subscribed (whitelisted)
+        if sender in whitelisted:
+            subscribed[sender] = sender_links
+            continue
+
         has_unsub = False
         latest_unsub_date = None
         
@@ -441,10 +470,10 @@ async def get_unsubscribe_links(
         
         if has_unsub and latest_unsub_date:
             # Check for newer active emails
-            has_newer_active = any(
+            has_newer_active = any([
                 not l['unsubscribed'] and safely_parse_date(l['added_at']) > latest_unsub_date
                 for l in sender_links
-            )
+            ])
             if has_newer_active:
                 critical[sender] = sender_links
             else:
@@ -458,11 +487,13 @@ async def get_unsubscribe_links(
         "critical": critical,
         "inbox": inbox,
         "handled": handled,
+        "subscribed": subscribed,
         "counts": {
             "critical": len(critical),
             "inbox": sum(len(v) for v in inbox.values()), # Inbox often shows email count
             "inbox_senders": len(inbox),
-            "handled": len(handled)
+            "handled": len(handled),
+            "subscribed": len(subscribed)
         }
     }
 
@@ -500,27 +531,35 @@ async def log_unsubscribe(
     await db.commit()
     return {"status": "OK"}
 
-@app.post("/api/whitelist")
-async def whitelist_domain(
+@app.post("/api/subscribe")
+async def subscribe_domain(
     domain: str = Query(...),
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
     domain = domain.lower()
-    # Check if already whitelisted
+    # Check if already subscribed
     stmt = select(WhitelistedDomain).where(WhitelistedDomain.user_id == user.id, WhitelistedDomain.domain == domain)
     result = await db.execute(stmt)
     if result.scalar_one_or_none():
-        return {"status": "OK", "message": "Already whitelisted"}
+        return {"status": "OK", "message": "Already subscribed"}
 
     new_w = WhitelistedDomain(user_id=user.id, domain=domain)
     db.add(new_w)
     
-    # Also delete existing entries for this domain so they disappear from the dashboard
-    # This ensures they don't show up in handled either
-    del_stmt = delete(UnsubscribeLink).where(UnsubscribeLink.user_id == user.id, UnsubscribeLink.list_name == domain)
-    await db.execute(del_stmt)
-    
+    # We no longer delete links. We just categorize them as 'subscribed' in the UI.
+    await db.commit()
+    return {"status": "OK"}
+
+@app.post("/api/unsubscribe_domain")
+async def unsubscribe_domain(
+    domain: str = Query(...),
+    user: User = Depends(login_required),
+    db: AsyncSession = Depends(get_db)
+):
+    domain = domain.lower()
+    stmt = delete(WhitelistedDomain).where(WhitelistedDomain.user_id == user.id, WhitelistedDomain.domain == domain)
+    await db.execute(stmt)
     await db.commit()
     return {"status": "OK"}
 
