@@ -11,10 +11,36 @@ services:
       - 8.8.4.4
     restart: always
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:9090:8000"
     volumes:
       - ./client_secret.json:/app/client_secret.json:ro
-      - unsubmy-db:/app/instance
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/unsubmyemail
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=a-secure-secret-key-for-sessions
+    depends_on:
+      - db
+      - redis
+    networks:
+      - proxy-network
+
+  db:
+    image: postgres:15-alpine
+    container_name: unsubmy-email-db
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=unsubmyemail
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - proxy-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: unsubmy-email-redis
+    restart: always
     networks:
       - proxy-network
 
@@ -23,4 +49,4 @@ networks:
     external: true
 
 volumes:
-  unsubmy-db: 
+  postgres_data:

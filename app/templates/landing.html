@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
 </head>
 <body>
     <header class="main-header">
@@ -17,7 +17,7 @@
                 {% if current_user.is_authenticated %}
                     <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Dashboard</a>
                 {% else %}
-                    <a href="{{ url_for('login') }}" class="btn btn-secondary">Login</a>
+                    <a href="{{ url_for('login_page') }}" class="btn btn-secondary">Login</a>
                 {% endif %}
             </div>
         </div>
@@ -29,7 +29,7 @@
             <p style="font-size: 1.25rem; color: var(--text-muted); max-width: 600px; margin: 0 auto 40px auto;">
                 Tired of endless promotional emails? Unsubmy.email scans your inbox for newsletters and subscriptions, gathering all unsubscribe links into one simple dashboard.
             </p>
-            <a href="{{ url_for('login') }}" class="btn btn-primary" style="font-size: 1.2rem; padding: 12px 30px;">Get Started for Free</a>
+            <a href="{{ url_for('login_page') }}" class="btn btn-primary" style="font-size: 1.2rem; padding: 12px 30px;">Get Started for Free</a>
         </div>
 
         <div class="dashboard-grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top: 100px;">

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
@@ -234,75 +234,47 @@
 
         async function fetchLinks() {
             if(!currentAccount) return;
-            // Fetch all and filter client side for now, or update API to return grouped
-            // For now, assume API returns everything for user, but we filter by currentAccount client-side if API doesn't support account filtering (API supports user filtering)
-            // Wait, API returns all links for USER. We need to filter by ACCOUNT.
-            // API response has `email_address` field.
+            const response = await fetch('/api/unsubscribe_links');
+            const data = await response.json();
             
-            const allLinks = await (await fetch('/api/unsubscribe_links')).json();
-            links = allLinks.filter(l => l.email_address === currentAccount.email_address);
-            
-            renderLinks();
+            // The API returns {critical, inbox, handled, counts}
+            // Each section is an object { [sender]: [links...] }
+            // We need to ensure we only show links for the CURRENT selected account
+            const filteredData = {
+                critical: new Map(),
+                inbox: new Map(),
+                handled: new Map()
+            };
+
+            const accountEmail = currentAccount.email_address;
+
+            Object.entries(data.critical).forEach(([sender, links]) => {
+                const accLinks = links.filter(l => l.account_email === accountEmail);
+                if (accLinks.length > 0) filteredData.critical.set(sender, accLinks);
+            });
+            Object.entries(data.inbox).forEach(([sender, links]) => {
+                const accLinks = links.filter(l => l.account_email === accountEmail);
+                if (accLinks.length > 0) filteredData.inbox.set(sender, accLinks);
+            });
+            Object.entries(data.handled).forEach(([sender, links]) => {
+                const accLinks = links.filter(l => l.account_email === accountEmail);
+                if (accLinks.length > 0) filteredData.handled.set(sender, accLinks);
+            });
+
+            renderLinks(filteredData);
         }
 
-        function renderLinks() {
-            // Group by category (Sender/Domain based)
-            const criticalMap = new Map();
-            const inboxMap = new Map();
-            const handledMap = new Map();
+        function renderLinks(groupedData) {
+            renderGroupedList(listContainer.critical, groupedData.critical, 'critical');
+            renderGroupedList(listContainer.new, groupedData.inbox, 'new');
+            renderGroupedList(listContainer.handled, groupedData.handled, 'handled');
 
-            const linksBySender = {};
-            links.forEach(l => {
-                if (!linksBySender[l.list_name]) {
-                    linksBySender[l.list_name] = [];
-                }
-                linksBySender[l.list_name].push(l);
-            });
-
-            Object.keys(linksBySender).forEach(senderName => {
-                const senderLinks = linksBySender[senderName];
-                senderLinks.sort((a, b) => new Date(b.added_at) - new Date(a.added_at));
-
-                let hasUnsub = false;
-                let latestUnsubDate = null;
-
-                senderLinks.forEach(l => {
-                    if (l.unsubscribed) {
-                        hasUnsub = true;
-                        if (!latestUnsubDate || new Date(l.unsubscribed_at) > latestUnsubDate) {
-                            latestUnsubDate = new Date(l.unsubscribed_at);
-                        }
-                    }
-                });
-
-                if (hasUnsub) {
-                    const hasNewerActive = senderLinks.some(l => 
-                        !l.unsubscribed && new Date(l.added_at) > latestUnsubDate
-                    );
-
-                    if (hasNewerActive) {
-                        criticalMap.set(senderName, senderLinks);
-                    } else {
-                        // Handled: Only keep the one they actually unsubscribed from (or the latest unsubbed one)
-                        const unsubbedLinks = senderLinks.filter(l => l.unsubscribed);
-                        handledMap.set(senderName, [unsubbedLinks[0]]); 
-                    }
-                } else {
-                    inboxMap.set(senderName, senderLinks);
-                }
-            });
-
-            // Flatten for display? Or keep grouped? 
-            // The user wants "domain and then grouped into the domain".
-            // Let's render them as groups.
-            
-            renderGroupedList(listContainer.critical, criticalMap, 'critical');
-            renderGroupedList(listContainer.new, inboxMap, 'new');
-            renderGroupedList(listContainer.handled, handledMap, 'handled');
-
-            badges.critical.textContent = criticalMap.size;
-            badges.new.textContent = Array.from(inboxMap.values()).flat().length; // Keep email count for inbox as requested
-            badges.handled.textContent = handledMap.size;
+            badges.critical.textContent = groupedData.critical.size;
+            // Inbox badge shows total email count
+            let inboxCount = 0;
+            groupedData.inbox.forEach(links => inboxCount += links.length);
+            badges.new.textContent = inboxCount;
+            badges.handled.textContent = groupedData.handled.size;
         }
 
         function renderGroupedList(container, groupsMap, type) {
