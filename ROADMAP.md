@@ -16,7 +16,7 @@ This roadmap tracks the evolution of unsubmy.email from its current robust backe
 ---
 
 ## 🚀 Phase 1: Security Hardening & Logic Refinement (High Priority)
-*Focus: Protecting user data and fixing "sub-optimal" legacy logic.*
+*Focus: Protecting user data and fixing suboptimal legacy logic.*
 
 - [ ] **1.1: Credential Encryption (Low-Hanging Fruit)**
     - Encrypt `LinkedAccount.credentials` at rest using `cryptography` (AES-256).

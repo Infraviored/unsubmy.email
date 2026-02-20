@@ -17,7 +17,7 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/unsubmyemail}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - SECRET_KEY=${SECRET_KEY:-vulnerable-default-key}
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
     depends_on:
       - db
       - redis
@@ -39,7 +39,7 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/unsubmyemail}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - SECRET_KEY=${SECRET_KEY:-vulnerable-default-key}
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
     depends_on:
       - db
       - redis

@@ -41,6 +41,12 @@ async def run_scan(user_id, account_id, num_emails, since_date):
                 return {"error": "Account not found"}
 
             creds_dict = account.get_credentials()
+            if not creds_dict or (account.provider != 'gmail' and not creds_dict.get('password')):
+                err_msg = "Missing credentials or password for account"
+                logger.error(err_msg)
+                redis_manager.publish(progress_channel, json.dumps({"error": err_msg}))
+                return {"error": err_msg}
+
             password_or_creds = creds_dict if account.provider == 'gmail' else creds_dict.get('password')
 
             client = get_email_client(
@@ -114,5 +120,3 @@ async def run_scan(user_id, account_id, num_emails, since_date):
                 logger.exception("Failed to rollback database session")
             redis_manager.publish(progress_channel, json.dumps({"error": str(e)}))
             return {"error": str(e)}
-        finally:
-            await db.close()

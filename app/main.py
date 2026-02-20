@@ -1,9 +1,9 @@
-from fastapi import FastAPI, Request, Depends, HTTPException, status, Form
+from fastapi import FastAPI, Request, Depends, HTTPException, status, Form, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from itsdangerous import URLSafeTimedSerializer
 import os
 import json
@@ -78,7 +78,8 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     request.scope["user"] = user
     return user
 
-def render_template(request: Request, name: str, context: dict = {}):
+def render_template(request: Request, name: str, context: dict | None = None):
+    context = context or {}
     """Helper to match Flask style and inject common vars"""
     # Simple flash message handling via query param for now
     error = request.query_params.get("error")
@@ -104,7 +105,7 @@ async def login_required(request: Request, user: User = Depends(get_current_user
             raise HTTPException(status_code=401, detail="Unauthorized")
         raise HTTPException(
             status_code=status.HTTP_303_SEE_OTHER,
-            headers={"Location": "/login?error=Authentication required"}
+            headers={"Location": "/login?error=Authentication%20required"}
         )
     return user
 
@@ -122,6 +123,7 @@ async def login_page(request: Request, user: User = Depends(get_current_user)):
 
 @app.post("/login")
 async def login(
+    request: Request,
     email: str = Form(...),
     password: str = Form(...),
     db: AsyncSession = Depends(get_db)
@@ -130,7 +132,10 @@ async def login(
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
     
-    if not user or not verify_password(password, user.password_hash):
+    user_exists = user is not None
+    password_correct = verify_password(password, user.password_hash) if user_exists else verify_password(password, "dummy_hash")
+    
+    if not user_exists or not password_correct:
         return RedirectResponse(url="/login?error=Invalid email or password", status_code=status.HTTP_303_SEE_OTHER)
     
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
@@ -140,13 +145,14 @@ async def login(
         value=session_data, 
         httponly=True, 
         max_age=3600*24*7,
-        secure=True, 
+        secure=request.url.scheme == "https", 
         samesite="lax"
     )
     return response
 
 @app.post("/register")
 async def register(
+    request: Request,
     email: str = Form(...),
     password: str = Form(...),
     db: AsyncSession = Depends(get_db)
@@ -171,7 +177,7 @@ async def register(
         value=session_data, 
         httponly=True, 
         max_age=3600*24*7,
-        secure=True, 
+        secure=request.url.scheme == "https", 
         samesite="lax"
     )
     return response
@@ -224,7 +230,11 @@ async def add_account(
         imap_server=data.get('imap') or data.get('imap_server') if provider == 'other' else None
     )
     if provider == 'other':
-        new_acc.set_credentials({"password": data.get('password')})
+        password = data.get('password')
+        imap = data.get('imap') or data.get('imap_server')
+        if not password or not imap:
+            return JSONResponse({"error": "IMAP server and password are required for custom accounts"}, status_code=400)
+        new_acc.set_credentials({"password": password})
     
     db.add(new_acc)
     await db.commit()
@@ -236,7 +246,10 @@ async def update_account(
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
-    email = data.get('email').lower()
+    email = data.get('email')
+    if not email:
+        return JSONResponse({"error": "Email is required"}, status_code=400)
+    email = email.lower()
     stmt = select(LinkedAccount).where(LinkedAccount.user_id == user.id, LinkedAccount.email_address == email)
     result = await db.execute(stmt)
     account = result.scalar_one_or_none()
@@ -250,16 +263,12 @@ async def update_account(
         
     await db.commit()
     return {"status": "OK"}
-
-from fastapi import Query
-
 @app.delete("/api/accounts")
 async def delete_linked_account(
     email: str = Query(...),
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
-    from sqlalchemy import delete
     email = email.lower()
     stmt = delete(LinkedAccount).where(LinkedAccount.user_id == user.id, LinkedAccount.email_address == email)
     await db.execute(stmt)
@@ -278,7 +287,7 @@ async def test_connection(data: dict, user: User = Depends(login_required)):
         status_code, msg = client.connect()
         try:
             client.logout()
-        except:
+        except Exception:
             pass
         return {"status": status_code, "message": msg}
     except Exception as e:
@@ -306,7 +315,6 @@ async def delete_account(
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
-    from sqlalchemy import delete
     await db.execute(delete(User).where(User.id == user.id))
     await db.commit()
     response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
@@ -402,6 +410,9 @@ async def log_unsubscribe(
     db: AsyncSession = Depends(get_db)
 ):
     link_href = data.get('href')
+    if not link_href:
+        return JSONResponse({"error": "Missing unsubscribe URL"}, status_code=400)
+    
     delete_others = data.get('delete_others', False)
     
     stmt = select(UnsubscribeLink).where(UnsubscribeLink.user_id == user.id, UnsubscribeLink.unsubscribe_url == link_href)
@@ -415,7 +426,6 @@ async def log_unsubscribe(
     link.unsubscribed_at = datetime.datetime.now(timezone.utc)
     
     if delete_others:
-        from sqlalchemy import delete
         d_stmt = (
             delete(UnsubscribeLink)
             .where(
@@ -542,14 +552,6 @@ async def oauth2callback(request: Request, code: str, state: str, db: AsyncSessi
     result = await db.execute(stmt)
     account = result.scalar_one_or_none()
 
-    creds_json = json.dumps({
-        'token': credentials.token,
-        'refresh_token': credentials.refresh_token,
-        'token_uri': credentials.token_uri,
-        'client_id': credentials.client_id,
-        'client_secret': credentials.client_secret,
-        'scopes': credentials.scopes
-    })
     if not account:
         account = LinkedAccount(
             user_id=user.id,

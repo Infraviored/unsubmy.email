@@ -4,6 +4,7 @@ from sqlalchemy import String, Integer, Text, ForeignKey, UniqueConstraint, Date
 import datetime
 from datetime import timezone
 import os
+import json
 import base64
 import hashlib
 from cryptography.fernet import Fernet
