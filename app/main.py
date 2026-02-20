@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, status, Form, Query
+from typing import Optional
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -44,8 +45,21 @@ templates = Jinja2Templates(directory="app/templates")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+class RedirectException(Exception):
+    def __init__(self, url: str):
+        self.url = url
+
+@app.exception_handler(RedirectException)
+async def redirect_exception_handler(request: Request, exc: RedirectException):
+    return RedirectResponse(url=exc.url, status_code=status.HTTP_303_SEE_OTHER)
+
 # --- Auth & Hashing ---
-SECRET_KEY = os.getenv("SECRET_KEY", "a-secure-secret-key-for-sessions")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY environment variable must be set for session security.")
+if SECRET_KEY == "a-secure-secret-key-for-sessions" or SECRET_KEY == "change-me-in-production":
+    raise RuntimeError("SECRET_KEY environment variable is using an insecure default value.")
+
 serializer = URLSafeTimedSerializer(SECRET_KEY)
 
 def get_password_hash(password: str) -> str:
@@ -113,10 +127,7 @@ async def login_required(request: Request, user: User = Depends(get_current_user
     if not user or not user.is_authenticated:
         if request.url.path.startswith("/api/"):
             raise HTTPException(status_code=401, detail="Unauthorized")
-        raise HTTPException(
-            status_code=status.HTTP_303_SEE_OTHER,
-            headers={"Location": "/login?error=Authentication%20required"}
-        )
+        raise RedirectException(url="/login?error=Authentication%20required")
     return user
 
 # --- Routes ---
@@ -301,10 +312,16 @@ async def test_connection(data: AccountAdd, user: User = Depends(login_required)
 
 @app.post("/change_password")
 async def change_password(
-    data: PasswordChange = Depends(),
+    current_password: str = Form(...),
+    new_password: str = Form(...),
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
+    try:
+        data = PasswordChange(current_password=current_password, new_password=new_password)
+    except Exception as e:
+        return RedirectResponse(url=f"/dashboard?error={str(e)}", status_code=status.HTTP_303_SEE_OTHER)
+
     if not verify_password(data.current_password, user.password_hash):
         return RedirectResponse(url="/dashboard?error=Current%20password%20incorrect", status_code=status.HTTP_303_SEE_OTHER)
     
@@ -451,9 +468,10 @@ redis_client = redis.from_url(REDIS_URL)
 
 @app.get("/scan")
 async def scan(
+    request: Request,
     email_address: str,
-    num_emails: str = None,
-    since_date: str = None,
+    num_emails: Optional[int] = Query(None),
+    since_date: Optional[str] = Query(None),
     user: User = Depends(login_required),
     db: AsyncSession = Depends(get_db)
 ):
@@ -470,17 +488,28 @@ async def scan(
         if account.last_scan_date:
             since_date = account.last_scan_date.strftime('%Y-%m-%d')
         else:
-            num_emails = "50"
+            num_emails = 50
 
     async def generate_scan_progress():
         pubsub = redis_client.pubsub()
         channel = f"scan_progress_{user.id}_{account.id}"
         await pubsub.subscribe(channel)
         
-        # Give Redis a brief moment to fully establish the subscription
-        await asyncio.sleep(0.1)
+        # Wait for Redis to confirm the subscription before starting the scan task
+        try:
+            for _ in range(10):
+                msg = await pubsub.get_message(ignore_subscribe_messages=False, timeout=1.0)
+                if msg and msg.get("type") == "subscribe":
+                    subscribed_channel = msg.get("channel")
+                    if isinstance(subscribed_channel, bytes):
+                        subscribed_channel = subscribed_channel.decode("utf-8")
+                    if subscribed_channel == channel:
+                        break
+                await asyncio.sleep(0.05)
+        except Exception:
+            logger.exception("Error while waiting for Redis subscription confirmation")
         
-        # Trigger background task AFTER subscribing to avoid race condition
+        # Trigger background task AFTER confirmed subscription to avoid race condition
         scan_emails_task.delay(user.id, account.id, num_emails, since_date)
         
         try:

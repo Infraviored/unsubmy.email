@@ -19,3 +19,4 @@ bcrypt
 celery
 redis
 werkzeug
+email-validator

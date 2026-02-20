@@ -15,7 +15,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-celery = Celery('worker', broker=REDIS_URL)
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
+celery = Celery('worker', broker=REDIS_URL, backend=CELERY_RESULT_BACKEND)
+
+celery.conf.update(
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    timezone="UTC",
+    enable_utc=True,
+    worker_concurrency=int(os.getenv("CELERY_WORKER_CONCURRENCY", "4")),
+)
 
 # Redis client for progress publishing
 redis_manager = redis.from_url(REDIS_URL)
