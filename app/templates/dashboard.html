@@ -214,10 +214,50 @@
             accounts.forEach(acc => {
                 const item = document.createElement('div');
                 item.className = `account-item ${currentAccount && currentAccount.email_address === acc.email_address ? 'active' : ''}`;
-                item.textContent = acc.email_address;
+                
+                const emailSpan = document.createElement('span');
+                emailSpan.className = 'account-email-text';
+                emailSpan.textContent = acc.email_address;
+                
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'delete-account-btn';
+                deleteBtn.style.border = 'none';
+                deleteBtn.style.background = 'transparent';
+                deleteBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+                deleteBtn.title = 'Remove Account';
+                deleteBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    handleDeleteAccount(acc.email_address);
+                };
+
                 item.onclick = () => selectAccount(acc);
+                
+                item.appendChild(emailSpan);
+                item.appendChild(deleteBtn);
                 accountListEl.appendChild(item);
             });
+        }
+
+        async function handleDeleteAccount(email) {
+            if (!confirm(`Are you sure you want to remove ${email}? This will also delete all associated unsubscribe links from our record.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/accounts?email=${encodeURIComponent(email)}`, {
+                    method: 'DELETE'
+                });
+                if (response.ok) {
+                    if (currentAccount && currentAccount.email_address === email) {
+                        currentAccount = null;
+                    }
+                    await fetchAccounts();
+                } else {
+                    alert('Failed to delete account.');
+                }
+            } catch (e) {
+                alert('Contacting server failed.');
+            }
         }
 
         function selectAccount(account) {

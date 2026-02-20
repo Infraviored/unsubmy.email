@@ -566,6 +566,7 @@ async def google_login(request: Request, user: User = Depends(login_required)):
     authorization_url, _ = flow.authorization_url(
         access_type='offline', 
         include_granted_scopes='true',
+        prompt='consent',
         state=signed_state
     )
     return RedirectResponse(authorization_url)

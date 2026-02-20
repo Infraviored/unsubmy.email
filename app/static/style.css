@@ -154,12 +154,39 @@ a:hover { color: var(--primary-hover); }
 .account-item {
     display: flex;
     align-items: center;
-    padding: 12px 16px;
+    justify-content: space-between;
+    padding: 10px 14px;
     border-radius: 10px;
     cursor: pointer;
     color: var(--text-muted);
     transition: all 0.2s;
     border: 1px solid transparent;
+    gap: 10px;
+    min-width: 0;
+}
+
+.account-email-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.delete-account-btn {
+    opacity: 0;
+    transition: all 0.2s;
+    color: var(--danger);
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.account-item:hover .delete-account-btn {
+    opacity: 0.6;
+}
+
+.delete-account-btn:hover {
+    opacity: 1 !important;
+    background: rgba(239, 68, 68, 0.1);
 }
 
 .account-item:hover {
