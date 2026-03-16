@@ -6,35 +6,42 @@
     <title>Unsubmy.email - Reclaim Your Inbox</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
 </head>
 <body>
+    <!-- Slim nav bar, consistent with dashboard and login -->
     <header class="main-header">
         <div class="container header-content">
-            <a href="/" class="logo">unsubmy.email</a>
+            <a href="/" class="logo"><img src="/favicon.svg" alt="Logo" class="logo-icon">unsubmy.email</a>
             <div>
                 {% if current_user.is_authenticated %}
                     <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Dashboard</a>
                 {% else %}
-                    <a href="{{ url_for('login') }}" class="btn btn-secondary">Login</a>
+                    <a href="{{ url_for('login_page') }}" class="btn btn-secondary">Login</a>
                 {% endif %}
             </div>
         </div>
     </header>
 
-    <div class="container" style="text-align: center; padding-top: 80px;">
+    <div class="container" style="text-align: center; padding-top: 60px;">
         <div class="hero">
-            <h1>Reclaim Your Inbox.</h1>
-            <p style="font-size: 1.25rem; color: var(--text-muted); max-width: 600px; margin: 0 auto 40px auto;">
+            <!-- Large brand wordmark lives in the hero as the headline -->
+            <a href="/" class="logo logo-landing" style="display:inline-flex; margin-bottom: 24px;"><img src="/favicon.svg" alt="Logo" class="logo-icon">unsubmy.email</a>
+            <p style="font-size: 1.1rem; color: var(--text-muted); max-width: 600px; margin: 0 auto 40px auto;">
                 Tired of endless promotional emails? Unsubmy.email scans your inbox for newsletters and subscriptions, gathering all unsubscribe links into one simple dashboard.
             </p>
-            <a href="{{ url_for('login') }}" class="btn btn-primary" style="font-size: 1.2rem; padding: 12px 30px;">Get Started for Free</a>
+            <a href="{{ url_for('login_page') }}" class="btn btn-primary" style="font-size: 1.1rem; padding: 12px 30px;">Get Started for Free</a>
         </div>
 
         <div class="dashboard-grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top: 100px;">
             <div class="card">
-                <h3>Secure & Private</h3>
+                <h3>Secure &amp; Private</h3>
                 <p style="color: var(--text-muted);">Connect your accounts with confidence. We use secure OAuth for Gmail and never store your passwords or email content.</p>
             </div>
             <div class="card">
@@ -42,7 +49,7 @@
                 <p style="color: var(--text-muted);">Manage unsubscribe links from multiple email accounts in a single, unified interface. No more hunting through individual emails.</p>
             </div>
             <div class="card">
-                <h3>Smart & Efficient</h3>
+                <h3>Smart &amp; Efficient</h3>
                 <p style="color: var(--text-muted);">Our tool intelligently identifies subscription emails and alerts you if a sender ignores your unsubscribe request.</p>
             </div>
         </div>

@@ -41,7 +41,7 @@ class EmailProvider(ABC):
             self.mail.logout()
             logging.info(f"Disconnected from {self.email_address}")
 
-    def scan_emails(self, num_emails: int = 50, since_uid: str | None = None, since_date: str | None = None, **kwargs):
+    def scan_emails(self, num_emails: int = 1000, since_uid: str | None = None, since_date: str | None = None, **kwargs):
         # This implementation can be shared across all IMAP-based providers
         if not self.mail:
             logging.error("Scan attempt failed: Not connected to the email server.")
@@ -51,14 +51,25 @@ class EmailProvider(ABC):
         # --- FIX: Login and Select right before scanning for non-Gmail providers ---
         if not isinstance(self, GmailProvider):
             try:
-                self.mail.login(self.email_address, self.password)
+                # Only login if not already authenticated
+                if self.mail.state == 'NONAUTH':
+                    self.mail.login(self.email_address, self.password)
+                
+                # Only select inbox if not already selected (or to ensure it's selected)
                 status, _ = self.mail.select("inbox")
                 if status != 'OK':
                     raise imaplib.IMAP4.error("Failed to select INBOX.")
                 logging.info(f"IMAP login and INBOX selection successful for {self.email_address}")
             except Exception as e:
+                msg = str(e).lower()
+                error_msg = f"Authentication failed: {e}"
+                if "authentication failed" in msg or "login failed" in msg:
+                    domain = self.email_address.split('@')[-1].lower()
+                    if domain in ['gmx.net', 'gmx.de', 'web.de']:
+                        error_msg += " (Hint: GMX/Web.de require enabling 'IMAP/POP3' in your email settings.)"
+                
                 logging.error(f"IMAP authentication/select failed for {self.email_address}: {e}")
-                yield {"status": "error", "message": f"Authentication failed: {e}"}
+                yield {"status": "error", "message": error_msg}
                 return
         
         search_criteria = "ALL"
@@ -215,13 +226,22 @@ class IMAPProvider(EmailProvider):
         if not self.imap_server:
             return "ERROR", "IMAP server is required for this provider."
         try:
-            # Only create the connection object here. Login/select will be done in scan_emails.
             self.mail = imaplib.IMAP4_SSL(self.imap_server)
-            logging.info(f"Successfully created IMAP SSL object for {self.imap_server}")
-            return "OK", "Successfully created IMAP connection object."
+            # Test login
+            self.mail.login(self.email_address, self.password)
+            # DO NOT logout here, we want to keep the connection for the scan if it follows
+            logging.info(f"Connection test successful for {self.email_address} on {self.imap_server}")
+            return "OK", "Successfully connected and authenticated."
         except Exception as e:
-            logging.error(f"Failed to create IMAP connection for {self.imap_server}: {e}")
-            return "ERROR", f"Failed to create IMAP connection: {e}"
+            msg = str(e).lower()
+            error_msg = f"Failed to connect/authenticate: {e}"
+            if "authentication failed" in msg or "login failed" in msg:
+                domain = self.email_address.split('@')[-1].lower()
+                if domain in ['gmx.net', 'gmx.de', 'web.de']:
+                    error_msg += " (Hint: Ensure IMAP is enabled in your GMX/Web.de settings.)"
+            
+            logging.error(f"IMAP connection/auth failed for {self.imap_server}: {e}")
+            return "ERROR", error_msg
 
     # This provider uses the default scan_emails from EmailProvider and logout from EmailProvider
 
@@ -249,7 +269,7 @@ class GmailProvider(EmailProvider):
         self.service = None
         logging.info("Disconnected from Gmail (no action needed).")
 
-    def scan_emails(self, num_emails: int = 50, since_date: str | None = None, **kwargs):
+    def scan_emails(self, num_emails: int = 1000, since_date: str | None = None, **kwargs):
         if not self.service:
             logging.error("Scan attempt failed: Not connected to the Gmail API.")
             yield {"status": "error", "message": "Not connected to the Gmail API."}

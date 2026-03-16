@@ -1,4 +1,7 @@
-Flask
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
 python-dotenv
 beautifulsoup4
 tqdm
@@ -7,6 +10,13 @@ lxml
 google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
-Flask-SQLAlchemy
-Flask-Login
-
+sqlalchemy[asyncio]
+asyncpg
+itsdangerous
+cryptography
+python-jose[cryptography]
+bcrypt
+celery
+redis
+werkzeug
+email-validator

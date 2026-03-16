@@ -8,6 +8,6 @@ RUN pip install --no-cache-dir gunicorn
 
 COPY . .
 
-EXPOSE 8000
+EXPOSE 9090
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--timeout", "600", "app.web_server:app"] 
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9090", "--proxy-headers", "--forwarded-allow-ips", "*"]
