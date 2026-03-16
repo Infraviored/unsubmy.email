@@ -51,7 +51,11 @@ class EmailProvider(ABC):
         # --- FIX: Login and Select right before scanning for non-Gmail providers ---
         if not isinstance(self, GmailProvider):
             try:
-                self.mail.login(self.email_address, self.password)
+                # Only login if not already authenticated
+                if self.mail.state == 'NONAUTH':
+                    self.mail.login(self.email_address, self.password)
+                
+                # Only select inbox if not already selected (or to ensure it's selected)
                 status, _ = self.mail.select("inbox")
                 if status != 'OK':
                     raise imaplib.IMAP4.error("Failed to select INBOX.")
@@ -225,9 +229,7 @@ class IMAPProvider(EmailProvider):
             self.mail = imaplib.IMAP4_SSL(self.imap_server)
             # Test login
             self.mail.login(self.email_address, self.password)
-            self.mail.logout()
-            # Recreate for next use if needed, or just return OK
-            # Actually, next time connect() is called it will recreate it anyway
+            # DO NOT logout here, we want to keep the connection for the scan if it follows
             logging.info(f"Connection test successful for {self.email_address} on {self.imap_server}")
             return "OK", "Successfully connected and authenticated."
         except Exception as e:
