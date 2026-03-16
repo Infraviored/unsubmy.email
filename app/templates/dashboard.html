@@ -6,7 +6,7 @@
     <title>Dashboard - Unsubmy.email</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
@@ -18,10 +18,7 @@
 <body>
     <header class="main-header">
         <div class="container header-content">
-            <a href="{{ url_for('dashboard') }}" class="logo">
-                <img src="/favicon.svg" alt="Logo" class="logo-icon">
-                unsubmy.email
-            </a>
+            <a href="{{ url_for('dashboard') }}" class="logo"><img src="/favicon.svg" alt="Logo" class="logo-icon">unsubmy.email</a>
             <div class="user-menu" style="display:flex; align-items:center; gap:20px;">
                 <span id="user-display" style="color:var(--text-muted); font-size:0.9rem;">
                    <i class="fa-solid fa-user"></i> {{ current_user.email }}

@@ -18,10 +18,7 @@
     <!-- Slim nav bar, consistent with dashboard and login -->
     <header class="main-header">
         <div class="container header-content">
-            <a href="/" class="logo">
-                <img src="/favicon.svg" alt="Logo" class="logo-icon">
-                unsubmy.email
-            </a>
+            <a href="/" class="logo"><img src="/favicon.svg" alt="Logo" class="logo-icon">unsubmy.email</a>
             <div>
                 {% if current_user.is_authenticated %}
                     <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Dashboard</a>
@@ -35,14 +32,11 @@
     <div class="container" style="text-align: center; padding-top: 60px;">
         <div class="hero">
             <!-- Large brand wordmark lives in the hero as the headline -->
-            <a href="/" class="logo logo-landing" style="display:inline-flex; margin-bottom: 24px;">
-                <img src="/favicon.svg" alt="Logo" class="logo-icon">
-                unsubmy.email
-            </a>
-            <p style="font-size: 1.25rem; color: var(--text-muted); max-width: 600px; margin: 0 auto 40px auto;">
+            <a href="/" class="logo logo-landing" style="display:inline-flex; margin-bottom: 24px;"><img src="/favicon.svg" alt="Logo" class="logo-icon">unsubmy.email</a>
+            <p style="font-size: 1.1rem; color: var(--text-muted); max-width: 600px; margin: 0 auto 40px auto;">
                 Tired of endless promotional emails? Unsubmy.email scans your inbox for newsletters and subscriptions, gathering all unsubscribe links into one simple dashboard.
             </p>
-            <a href="{{ url_for('login_page') }}" class="btn btn-primary" style="font-size: 1.2rem; padding: 12px 30px;">Get Started for Free</a>
+            <a href="{{ url_for('login_page') }}" class="btn btn-primary" style="font-size: 1.1rem; padding: 12px 30px;">Get Started for Free</a>
         </div>
 
         <div class="dashboard-grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top: 100px;">
