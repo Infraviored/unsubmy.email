@@ -469,8 +469,20 @@
 
         window.handleUnsubClick = (url, id, listName) => {
             currentLinkAction = { id, list_name: listName, url };
-            // Open link in new tab
-            window.open(url, '_blank');
+            
+            // Define popup dimensions and position
+            const width = 1000;
+            const height = 800;
+            const left = (window.innerWidth / 2) - (width / 2) + window.screenX;
+            const top = (window.innerHeight / 2) - (height / 2) + window.screenY;
+            
+            // Open link in a popup window
+            window.open(
+                url, 
+                'UnsubscribePopup', 
+                `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+            );
+            
             // Show modal
             document.getElementById('unsub-modal').style.display = 'flex';
         };
